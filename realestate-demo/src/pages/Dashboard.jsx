@@ -1,17 +1,18 @@
 import React, { useState, useEffect } from "react";
-import { Search, Plus, Trash2 } from "lucide-react";
+import { Search, Plus, Trash2, LogOut } from "lucide-react";
 import { supabase } from "../lib/supabaseClient";
 import { useNavigate } from "react-router-dom";
 
 export default function ProjectsDashboard() {
   const [projects, setProjects] = useState([]);
   const [searchTerm, setSearchTerm] = useState("");
+  const [filterBy, setFilterBy] = useState("client_name");
   const [itemsPerPage, setItemsPerPage] = useState(10);
   const [activeTab, setActiveTab] = useState("Active");
 
   const navigate = useNavigate();
 
-  // 🔹 Fetch properties data from Supabase
+  // Fetch properties data
   useEffect(() => {
     const fetchProperties = async () => {
       const { data, error } = await supabase
@@ -31,21 +32,24 @@ export default function ProjectsDashboard() {
     fetchProperties();
   }, []);
 
-  // 🔍 Search filter
+  // Filter projects
   const filteredProjects = projects.filter((project) => {
     const term = searchTerm.toLowerCase();
-    return (
-      project.client_name?.toLowerCase().includes(term) ||
-      project.site_address?.toLowerCase().includes(term) ||
-      project.city?.toLowerCase().includes(term) ||
-      (project.project_area?.toString() || "").includes(term)
-    );
+    switch (filterBy) {
+      case "client_name":
+        return project.client_name?.toLowerCase().includes(term);
+      case "site_address":
+        return project.site_address?.toLowerCase().includes(term);
+      case "project_area":
+        return (project.project_area?.toString() || "").includes(term);
+      default:
+        return true;
+    }
   });
 
-  // 🗑️ Delete project
+  // Delete project
   const handleDelete = async (id) => {
-    const confirmDelete = window.confirm("Are you sure you want to delete this project?");
-    if (!confirmDelete) return;
+    if (!window.confirm("Are you sure you want to delete this project?")) return;
 
     const { error } = await supabase.from("properties").delete().eq("id", id);
     if (!error) {
@@ -56,9 +60,17 @@ export default function ProjectsDashboard() {
     }
   };
 
-  // ➕ Add new project
-  const handleAddNew = () => {
-    navigate("/projects/new");
+  // Add new project
+  const handleAddNew = () => navigate("/projects/new");
+
+  // Logout
+  const handleLogout = async () => {
+    const { error } = await supabase.auth.signOut();
+    if (!error) {
+      navigate("/"); // redirect to login page after logout
+    } else {
+      alert("Logout failed: " + error.message);
+    }
   };
 
   return (
@@ -67,13 +79,22 @@ export default function ProjectsDashboard() {
         {/* Header */}
         <div className="flex justify-between items-center mb-6">
           <h1 className="text-2xl font-semibold text-gray-800">Projects</h1>
-          <button
-            onClick={handleAddNew}
-            className="bg-orange-100 text-orange-600 px-4 py-2 rounded hover:bg-orange-200 flex items-center gap-2 font-medium"
-          >
-            <Plus size={20} />
-            New Project
-          </button>
+          <div className="flex gap-4">
+            <button
+              onClick={handleAddNew}
+              className="bg-orange-100 text-orange-600 px-4 py-2 rounded hover:bg-orange-200 flex items-center gap-2 font-medium"
+            >
+              <Plus size={20} />
+              New Project
+            </button>
+            <button
+              onClick={handleLogout}
+              className="bg-red-100 text-red-600 px-4 py-2 rounded hover:bg-red-200 flex items-center gap-2 font-medium"
+            >
+              <LogOut size={20} />
+              Logout
+            </button>
+          </div>
         </div>
 
         {/* Tabs */}
@@ -100,13 +121,22 @@ export default function ProjectsDashboard() {
           </button>
         </div>
 
-        {/* Search Bar */}
-        <div className="mb-4 flex items-center gap-4">
+        {/* Search + Filter */}
+        <div className="mb-4 flex flex-col sm:flex-row sm:items-center gap-4">
+          <select
+            value={filterBy}
+            onChange={(e) => setFilterBy(e.target.value)}
+            className="border border-gray-300 rounded px-3 py-2 focus:outline-none focus:ring-2 focus:ring-orange-400"
+          >
+            <option value="client_name">Filter by Email</option>
+            <option value="site_address">Filter by Site Address</option>
+            <option value="project_area">Filter by Project Area</option>
+          </select>
           <div className="relative flex-1 max-w-xs">
             <Search size={18} className="absolute left-3 top-3 text-gray-400" />
             <input
               type="text"
-              placeholder="Search by Client, Address, or City"
+              placeholder={`Search by ${filterBy.replace("_", " ")}`}
               value={searchTerm}
               onChange={(e) => setSearchTerm(e.target.value)}
               className="w-full pl-10 pr-4 py-2 border border-gray-300 rounded focus:outline-none focus:ring-2 focus:ring-orange-400"
@@ -119,30 +149,15 @@ export default function ProjectsDashboard() {
           <table className="w-full text-sm">
             <thead>
               <tr className="border-b bg-gray-50">
-                <th className="px-6 py-3 text-left font-semibold text-gray-700">
-                  Client Name
-                </th>
-                <th className="px-6 py-3 text-left font-semibold text-gray-700">
-                  Site Address
-                </th>
-                <th className="px-6 py-3 text-left font-semibold text-gray-700">
-                  City
-                </th>
-                <th className="px-6 py-3 text-left font-semibold text-gray-700">
-                  Project Area
-                </th>
-                <th className="px-6 py-3 text-left font-semibold text-gray-700">
-                  Project Cost
-                </th>
-                <th className="px-6 py-3 text-left font-semibold text-gray-700">
-                  Created At
-                </th>
-                <th className="px-6 py-3 text-center font-semibold text-gray-700">
-                  Action
-                </th>
+                <th className="px-6 py-3 text-left font-semibold text-gray-700">Client Name</th>
+                <th className="px-6 py-3 text-left font-semibold text-gray-700">Site Address</th>
+                <th className="px-6 py-3 text-left font-semibold text-gray-700">City</th>
+                <th className="px-6 py-3 text-left font-semibold text-gray-700">Project Area</th>
+                <th className="px-6 py-3 text-left font-semibold text-gray-700">Project Cost</th>
+                <th className="px-6 py-3 text-left font-semibold text-gray-700">Created At</th>
+                <th className="px-6 py-3 text-center font-semibold text-gray-700">Action</th>
               </tr>
             </thead>
-
             <tbody>
               {filteredProjects.length > 0 ? (
                 filteredProjects.map((p) => (
@@ -152,9 +167,7 @@ export default function ProjectsDashboard() {
                     <td className="px-6 py-4 text-gray-600">{p.city || "-"}</td>
                     <td className="px-6 py-4 text-gray-600">{p.project_area || "-"}</td>
                     <td className="px-6 py-4 text-gray-600">
-                      {p.project_cost
-                        ? `${p.project_cost} ${p.currency || ""}`
-                        : "-"}
+                      {p.project_cost ? `${p.project_cost} ${p.currency || ""}` : "-"}
                     </td>
                     <td className="px-6 py-4 text-gray-600">
                       {new Date(p.created_at).toLocaleDateString()}

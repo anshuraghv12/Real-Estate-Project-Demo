@@ -116,7 +116,7 @@ const CreateProject = () => {
 
       <div className="max-w-3xl mx-auto bg-white shadow-2xl rounded-2xl p-8 border-t-8 border-blue-600">
         <h1 className="text-3xl font-bold text-center text-blue-700 mb-6">
-          🏗️ Create New Project
+          Create New Project
         </h1>
 
         {!submitted ? (

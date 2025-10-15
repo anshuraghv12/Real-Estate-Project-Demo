@@ -17,26 +17,15 @@ export default function Login() {
   const [loading, setLoading] = useState(false);
   const [message, setMessage] = useState("");
 
-  // Auto-redirect if user already logged in + listen to auth state changes
   useEffect(() => {
     let mounted = true;
-
-    // initial check
     supabase.auth.getSession().then(({ data }) => {
       if (!mounted) return;
-      if (data?.session) {
-        navigate("/dashboard");
-      }
-    }).catch(err => {
-      console.error("getSession error:", err);
+      if (data?.session) navigate("/dashboard");
     });
 
-    // subscribe to auth state changes (login/logout, OAuth redirect)
     const { data: listener } = supabase.auth.onAuthStateChange((event, session) => {
-      // events: SIGNED_IN, SIGNED_OUT, TOKEN_REFRESHED, USER_UPDATED, etc.
-      if (event === "SIGNED_IN" && session) {
-        navigate("/dashboard");
-      }
+      if (event === "SIGNED_IN" && session) navigate("/dashboard");
     });
 
     return () => {
@@ -45,9 +34,7 @@ export default function Login() {
     };
   }, [navigate]);
 
-  const handleInputChange = (e) => {
-    setFormData({ ...formData, [e.target.name]: e.target.value });
-  };
+  const handleInputChange = (e) => setFormData({ ...formData, [e.target.name]: e.target.value });
 
   const handleSubmit = async () => {
     setLoading(true);
@@ -55,102 +42,55 @@ export default function Login() {
 
     try {
       if (isSignUp) {
-        // validation
         if (formData.password !== formData.confirmPassword) {
           setMessage("Passwords do not match!");
           setLoading(false);
           return;
         }
         if (!formData.name?.trim()) {
-          setMessage("Please provide your name.");
+          setMessage("Please enter your full name.");
           setLoading(false);
           return;
         }
 
-        // 1) Sign up user (this will create user in Supabase Auth)
         const { data: signUpData, error: signUpError } = await supabase.auth.signUp({
           email: formData.email,
           password: formData.password,
-        }, {
-          // user metadata saved into auth.user.user_metadata
-          data: { name: formData.name }
-        });
+        }, { data: { name: formData.name } });
 
         if (signUpError) throw signUpError;
 
-        // signUpData may contain user (and session if auto-login enabled)
         const user = signUpData?.user ?? null;
         const session = signUpData?.session ?? null;
 
-        // 2) Create profile row in "profiles" table (if user exists)
         if (user?.id) {
-          try {
-            await supabase
-              .from("profiles")
-              .upsert({ id: user.id, email: user.email, name: formData.name }, { onConflict: "id" });
-            // upsert used so repeated calls won't error
-          } catch (profileErr) {
-            console.warn("Could not create profile:", profileErr);
-            // Not fatal — continue
-          }
+          await supabase.from("profiles").upsert({
+            id: user.id,
+            email: user.email,
+            name: formData.name
+          }, { onConflict: "id" });
         }
 
-        // 3) If session exists (auto confirm), redirect. Otherwise attempt sign-in so user sees dashboard immediately.
-        if (session) {
-          setMessage("Account created & logged in!");
-          navigate("/dashboard");
-        } else {
-          // Try to sign in immediately (works if email confirmation is not required OR magic link flow)
-          try {
-            const { data: signInData, error: signInError } = await supabase.auth.signInWithPassword({
-              email: formData.email,
-              password: formData.password
-            });
-
-            if (signInError) {
-              // If sign in fails due to confirmation required, just inform user
-              setMessage("Account created. Please check your email to confirm (if required).");
-            } else if (signInData?.user) {
-              setMessage("Account created & logged in!");
-              navigate("/dashboard");
-            } else {
-              setMessage("Account created. Please confirm your email if required.");
-            }
-          } catch (innerErr) {
-            console.warn("Sign-in after signup failed:", innerErr);
-            setMessage("Account created. Please check your email to confirm (if required).");
-          }
+        if (session) navigate("/dashboard");
+        else {
+          const { data: signInData, error: signInError } = await supabase.auth.signInWithPassword({
+            email: formData.email,
+            password: formData.password
+          });
+          if (signInError) setMessage("Account created. Please check your email to confirm.");
+          else navigate("/dashboard");
         }
+
       } else {
-        // Sign in flow
         const { data, error } = await supabase.auth.signInWithPassword({
           email: formData.email,
           password: formData.password,
         });
-
         if (error) throw error;
-        if (data?.user) {
-          // ensure profile exists (optional)
-          try {
-            await supabase.from("profiles").upsert(
-              { id: data.user.id, email: data.user.email, name: data.user.user_metadata?.name ?? null },
-              { onConflict: "id" }
-            );
-          } catch (upsertErr) {
-            console.warn("profiles upsert error:", upsertErr);
-          }
-
-          setMessage("Logged in successfully!");
-          navigate("/dashboard");
-        } else {
-          setMessage("Login successful (no user object returned).");
-        }
+        if (data?.user) navigate("/dashboard");
       }
     } catch (error) {
-      // Supabase errors sometimes have .message, sometimes structured
-      const errMsg = error?.message || JSON.stringify(error);
-      setMessage(errMsg);
-      console.error("Auth error:", error);
+      setMessage(error?.message || "Authentication failed.");
     } finally {
       setLoading(false);
     }
@@ -159,55 +99,38 @@ export default function Login() {
   const handleGoogleLogin = async () => {
     setMessage("Redirecting to Google...");
     try {
-      const redirectUrl = window.location.origin + "/dashboard"; // ensure this URL is added in Supabase OAuth settings
-      const { error } = await supabase.auth.signInWithOAuth({
-        provider: "google",
-        options: {
-          redirectTo: redirectUrl,
-        },
-      });
+      const redirectUrl = window.location.origin + "/dashboard";
+      const { error } = await supabase.auth.signInWithOAuth({ provider: "google", options: { redirectTo: redirectUrl } });
       if (error) throw error;
-      // Note: The actual redirect happens immediately; on return, the auth state listener will redirect to dashboard.
     } catch (error) {
       setMessage(error.message || "Google sign-in failed");
-      console.error("Google OAuth error:", error);
     }
   };
 
-  const handleKeyPress = (e) => {
-    if (e.key === "Enter") handleSubmit();
-  };
+  const handleKeyPress = (e) => { if (e.key === "Enter") handleSubmit(); };
 
   return (
     <div className="min-h-screen flex items-center justify-center bg-gray-50 p-4">
       <div className="relative w-full max-w-5xl h-[600px]">
         <div
-          className={`absolute inset-0 flex transition-all duration-700 ease-in-out ${
-            isSignUp ? "flex-row-reverse" : "flex-row"
-          }`}
+          className={`absolute inset-0 flex transition-all duration-700 ease-in-out ${isSignUp ? "flex-row-reverse" : "flex-row"}`}
         >
-          {/* Gradient Panel */}
+          {/* Left/Right Panel with Swap Animation */}
           <div
-            className={`w-1/2 rounded-3xl shadow-2xl flex flex-col items-center justify-center text-white p-12 transition-all duration-700 ${
-              isSignUp
-                ? "bg-gradient-to-br from-pink-400 via-purple-400 to-purple-500"
-                : "bg-gradient-to-br from-purple-500 via-purple-600 to-purple-700"
-            }`}
+            className={`w-1/2 rounded-3xl shadow-2xl flex flex-col items-center justify-center text-white p-12 transition-all duration-700
+              ${isSignUp
+                ? "bg-gradient-to-br from-purple-700 via-purple-600 to-purple-500"
+                : "bg-gradient-to-br from-blue-600 via-blue-500 to-blue-400"}`}
           >
-            <h1 className="text-4xl font-bold mb-4">
-              {isSignUp ? "Welcome Back!" : "Hello, Students!"}
-            </h1>
+            <h1 className="text-4xl font-bold mb-4">{isSignUp ? "Already a Client?" : "Welcome Back!"}</h1>
             <p className="text-center text-lg mb-8 opacity-90">
               {isSignUp
-                ? "Enter your personal details to use all site features"
-                : "Create your account to start practice tests, attend exams, and check scores"}
+                ? "Sign in to access your projects and manage your data"
+                : "Create an account to manage your projects and track progress"}
             </p>
             <button
-              onClick={() => {
-                setIsSignUp(!isSignUp);
-                setMessage("");
-              }}
-              className="px-12 py-3 border-2 border-white rounded-full text-white font-semibold hover:bg-white hover:text-purple-600 transition-all duration-300"
+              onClick={() => { setIsSignUp(!isSignUp); setMessage(""); }}
+              className="px-12 py-3 border-2 border-white rounded-full text-white font-semibold hover:bg-white hover:text-blue-600 transition-all duration-300"
             >
               {isSignUp ? "SIGN IN" : "SIGN UP"}
             </button>
@@ -216,9 +139,7 @@ export default function Login() {
           {/* Form Panel */}
           <div className="w-1/2 bg-white rounded-3xl shadow-2xl flex items-center justify-center p-12">
             <div className="w-full max-w-md">
-              <h2 className="text-3xl font-bold mb-6 text-center">
-                {isSignUp ? "Create Account" : "Sign In"}
-              </h2>
+              <h2 className="text-3xl font-bold mb-6 text-center">{isSignUp ? "Client Registration" : "Client Login"}</h2>
 
               {!isSignUp && (
                 <div className="mb-6">
@@ -226,12 +147,6 @@ export default function Login() {
                     onClick={handleGoogleLogin}
                     className="w-full flex items-center justify-center gap-3 px-6 py-3 border-2 border-gray-300 rounded-lg hover:bg-gray-50 transition-all duration-200"
                   >
-                    <svg className="w-5 h-5" viewBox="0 0 24 24">
-                      <path fill="#4285F4" d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z" />
-                      <path fill="#34A853" d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z" />
-                      <path fill="#FBBC05" d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.07H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.93l2.85-2.22.81-.62z" />
-                      <path fill="#EA4335" d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.07l3.66 2.84c.87-2.6 3.3-4.53 6.16-4.53z" />
-                    </svg>
                     <span className="font-medium text-gray-700">Sign in with Google</span>
                   </button>
                   <div className="relative my-6">
@@ -247,7 +162,7 @@ export default function Login() {
 
               {isSignUp && (
                 <p className="text-center text-gray-600 mb-6 text-sm">
-                  or use your email for registration
+                  or register with your email
                 </p>
               )}
 
@@ -256,11 +171,11 @@ export default function Login() {
                   <input
                     type="text"
                     name="name"
-                    placeholder="Name"
+                    placeholder="Full Name"
                     value={formData.name}
                     onChange={handleInputChange}
                     onKeyPress={handleKeyPress}
-                    className="w-full px-4 py-3 bg-gray-100 border-0 rounded-lg focus:outline-none focus:ring-2 focus:ring-purple-500"
+                    className="w-full px-4 py-3 bg-gray-100 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
                   />
                 )}
 
@@ -271,7 +186,7 @@ export default function Login() {
                   value={formData.email}
                   onChange={handleInputChange}
                   onKeyPress={handleKeyPress}
-                  className="w-full px-4 py-3 bg-gray-100 border-0 rounded-lg focus:outline-none focus:ring-2 focus:ring-purple-500"
+                  className="w-full px-4 py-3 bg-gray-100 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
                 />
 
                 <div className="relative">
@@ -282,7 +197,7 @@ export default function Login() {
                     value={formData.password}
                     onChange={handleInputChange}
                     onKeyPress={handleKeyPress}
-                    className="w-full px-4 py-3 bg-gray-100 border-0 rounded-lg focus:outline-none focus:ring-2 focus:ring-purple-500"
+                    className="w-full px-4 py-3 bg-gray-100 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
                   />
                   <button
                     type="button"
@@ -302,7 +217,7 @@ export default function Login() {
                       value={formData.confirmPassword}
                       onChange={handleInputChange}
                       onKeyPress={handleKeyPress}
-                      className="w-full px-4 py-3 bg-gray-100 border-0 rounded-lg focus:outline-none focus:ring-2 focus:ring-purple-500"
+                      className="w-full px-4 py-3 bg-gray-100 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
                     />
                     <button
                       type="button"
@@ -318,9 +233,9 @@ export default function Login() {
                   <div className="text-right">
                     <button
                       type="button"
-                      className="text-sm text-gray-600 hover:text-purple-600 transition-colors"
+                      className="text-sm text-gray-600 hover:text-blue-600 transition-colors"
                     >
-                      Forget Your Password?
+                      Forgot your password?
                     </button>
                   </div>
                 )}
@@ -328,17 +243,13 @@ export default function Login() {
                 <button
                   onClick={handleSubmit}
                   disabled={loading}
-                  className="w-full py-3 bg-gradient-to-r from-purple-600 to-purple-700 text-white font-semibold rounded-lg hover:from-purple-700 hover:to-purple-800 transition-all duration-300 disabled:opacity-50"
+                  className="w-full py-3 bg-gradient-to-r from-blue-600 to-blue-700 text-white font-semibold rounded-lg hover:from-blue-700 hover:to-blue-800 transition-all duration-300 disabled:opacity-50"
                 >
-                  {loading ? "Loading..." : isSignUp ? "SIGN UP" : "SIGN IN"}
+                  {loading ? "Processing..." : isSignUp ? "REGISTER" : "LOGIN"}
                 </button>
 
                 {message && (
-                  <p
-                    className={`text-center text-sm ${
-                      message.toLowerCase().includes("success") || message.toLowerCase().includes("logged in") ? "text-green-600" : "text-red-600"
-                    }`}
-                  >
+                  <p className={`text-center text-sm ${message.toLowerCase().includes("success") ? "text-green-600" : "text-red-600"}`}>
                     {message}
                   </p>
                 )}
