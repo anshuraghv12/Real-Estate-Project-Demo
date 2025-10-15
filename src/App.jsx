@@ -8,18 +8,28 @@ import Dashboard from "./pages/Dashboard";
 import CreateProject from "./pages/projects/CreateProject";
 import ProjectsList from "./pages/projects/ProjectsList";
 
-// Small wrapper to handle Supabase auth events
 function AuthHandler() {
   const navigate = useNavigate();
 
   useEffect(() => {
-    // Listen for Supabase auth state changes
+    // 1️⃣ Handle hash fragment (Google OAuth redirect)
+    const hash = window.location.hash;
+    if (hash && hash.includes("access_token")) {
+      supabase.auth
+        .getSessionFromUrl({ storeSession: true })
+        .then(({ data, error }) => {
+          if (error) console.error("Error handling OAuth redirect:", error);
+          else {
+            console.log("✅ OAuth login successful:", data.session);
+            navigate("/dashboard");
+          }
+        });
+    }
+
+    // 2️⃣ Handle state change if logged in later
     const { data: listener } = supabase.auth.onAuthStateChange(
       async (event, session) => {
-        if (event === "SIGNED_IN") {
-          // Redirect user to dashboard when signed in
-          navigate("/dashboard");
-        }
+        if (event === "SIGNED_IN") navigate("/dashboard");
       }
     );
 
@@ -28,15 +38,13 @@ function AuthHandler() {
     };
   }, [navigate]);
 
-  return null; // this component just handles the redirect
+  return null;
 }
 
 export default function App() {
   return (
     <BrowserRouter>
-      {/* Auth listener to handle login redirects */}
       <AuthHandler />
-
       <Routes>
         <Route path="/" element={<Login />} />
         <Route path="/dashboard" element={<Dashboard />} />
