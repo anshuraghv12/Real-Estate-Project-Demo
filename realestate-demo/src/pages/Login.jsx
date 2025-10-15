@@ -17,12 +17,33 @@ export default function Login() {
   const [loading, setLoading] = useState(false);
   const [message, setMessage] = useState("");
 
-  // Auto-redirect if user already logged in
+  // Auto-redirect if user already logged in + listen to auth state changes
   useEffect(() => {
+    let mounted = true;
+
+    // initial check
     supabase.auth.getSession().then(({ data }) => {
-      if (data?.session) navigate("/dashboard");
+      if (!mounted) return;
+      if (data?.session) {
+        navigate("/dashboard");
+      }
+    }).catch(err => {
+      console.error("getSession error:", err);
     });
-  }, []);
+
+    // subscribe to auth state changes (login/logout, OAuth redirect)
+    const { data: listener } = supabase.auth.onAuthStateChange((event, session) => {
+      // events: SIGNED_IN, SIGNED_OUT, TOKEN_REFRESHED, USER_UPDATED, etc.
+      if (event === "SIGNED_IN" && session) {
+        navigate("/dashboard");
+      }
+    });
+
+    return () => {
+      mounted = false;
+      if (listener?.subscription) listener.subscription.unsubscribe();
+    };
+  }, [navigate]);
 
   const handleInputChange = (e) => {
     setFormData({ ...formData, [e.target.name]: e.target.value });
@@ -34,30 +55,74 @@ export default function Login() {
 
     try {
       if (isSignUp) {
+        // validation
         if (formData.password !== formData.confirmPassword) {
           setMessage("Passwords do not match!");
           setLoading(false);
           return;
         }
+        if (!formData.name?.trim()) {
+          setMessage("Please provide your name.");
+          setLoading(false);
+          return;
+        }
 
-        // Sign up user with email & password
-        const { data, error } = await supabase.auth.signUp({
+        // 1) Sign up user (this will create user in Supabase Auth)
+        const { data: signUpData, error: signUpError } = await supabase.auth.signUp({
           email: formData.email,
           password: formData.password,
-          options: {
-            data: {
-              name: formData.name, // Save name in user metadata
-            },
-          },
+        }, {
+          // user metadata saved into auth.user.user_metadata
+          data: { name: formData.name }
         });
 
-        if (error) throw error;
-        if (data?.user) {
-          setMessage("Account created successfully!");
-          navigate("/dashboard"); // Redirect after signup
+        if (signUpError) throw signUpError;
+
+        // signUpData may contain user (and session if auto-login enabled)
+        const user = signUpData?.user ?? null;
+        const session = signUpData?.session ?? null;
+
+        // 2) Create profile row in "profiles" table (if user exists)
+        if (user?.id) {
+          try {
+            await supabase
+              .from("profiles")
+              .upsert({ id: user.id, email: user.email, name: formData.name }, { onConflict: "id" });
+            // upsert used so repeated calls won't error
+          } catch (profileErr) {
+            console.warn("Could not create profile:", profileErr);
+            // Not fatal — continue
+          }
+        }
+
+        // 3) If session exists (auto confirm), redirect. Otherwise attempt sign-in so user sees dashboard immediately.
+        if (session) {
+          setMessage("Account created & logged in!");
+          navigate("/dashboard");
+        } else {
+          // Try to sign in immediately (works if email confirmation is not required OR magic link flow)
+          try {
+            const { data: signInData, error: signInError } = await supabase.auth.signInWithPassword({
+              email: formData.email,
+              password: formData.password
+            });
+
+            if (signInError) {
+              // If sign in fails due to confirmation required, just inform user
+              setMessage("Account created. Please check your email to confirm (if required).");
+            } else if (signInData?.user) {
+              setMessage("Account created & logged in!");
+              navigate("/dashboard");
+            } else {
+              setMessage("Account created. Please confirm your email if required.");
+            }
+          } catch (innerErr) {
+            console.warn("Sign-in after signup failed:", innerErr);
+            setMessage("Account created. Please check your email to confirm (if required).");
+          }
         }
       } else {
-        // Sign in user with email & password
+        // Sign in flow
         const { data, error } = await supabase.auth.signInWithPassword({
           email: formData.email,
           password: formData.password,
@@ -65,12 +130,27 @@ export default function Login() {
 
         if (error) throw error;
         if (data?.user) {
+          // ensure profile exists (optional)
+          try {
+            await supabase.from("profiles").upsert(
+              { id: data.user.id, email: data.user.email, name: data.user.user_metadata?.name ?? null },
+              { onConflict: "id" }
+            );
+          } catch (upsertErr) {
+            console.warn("profiles upsert error:", upsertErr);
+          }
+
           setMessage("Logged in successfully!");
-          navigate("/dashboard"); // Redirect after login
+          navigate("/dashboard");
+        } else {
+          setMessage("Login successful (no user object returned).");
         }
       }
     } catch (error) {
-      setMessage(error.message);
+      // Supabase errors sometimes have .message, sometimes structured
+      const errMsg = error?.message || JSON.stringify(error);
+      setMessage(errMsg);
+      console.error("Auth error:", error);
     } finally {
       setLoading(false);
     }
@@ -79,15 +159,18 @@ export default function Login() {
   const handleGoogleLogin = async () => {
     setMessage("Redirecting to Google...");
     try {
+      const redirectUrl = window.location.origin + "/dashboard"; // ensure this URL is added in Supabase OAuth settings
       const { error } = await supabase.auth.signInWithOAuth({
         provider: "google",
         options: {
-          redirectTo: window.location.origin + "/dashboard", // Redirect after Google login
+          redirectTo: redirectUrl,
         },
       });
       if (error) throw error;
+      // Note: The actual redirect happens immediately; on return, the auth state listener will redirect to dashboard.
     } catch (error) {
-      setMessage(error.message);
+      setMessage(error.message || "Google sign-in failed");
+      console.error("Google OAuth error:", error);
     }
   };
 
@@ -253,7 +336,7 @@ export default function Login() {
                 {message && (
                   <p
                     className={`text-center text-sm ${
-                      message.includes("success") ? "text-green-600" : "text-red-600"
+                      message.toLowerCase().includes("success") || message.toLowerCase().includes("logged in") ? "text-green-600" : "text-red-600"
                     }`}
                   >
                     {message}

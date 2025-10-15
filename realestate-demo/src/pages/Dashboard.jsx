@@ -9,53 +9,54 @@ export default function ProjectsDashboard() {
   const [itemsPerPage, setItemsPerPage] = useState(10);
   const [activeTab, setActiveTab] = useState("Active");
 
-  // Fetch projects from Supabase
+  const navigate = useNavigate();
+
+  // 🔹 Fetch properties data from Supabase
   useEffect(() => {
-    const fetchProjects = async () => {
-      const { data, error } = await supabase.from("projects").select(`
-        id,
-        site_address,
-        project_area,
-        status,
-        created_at,
-        client_id,
-        clients (email, name)
-      `);
+    const fetchProperties = async () => {
+      const { data, error } = await supabase
+        .from("properties")
+        .select(
+          "id, client_name, site_address, country, city, project_area, project_cost, currency, created_at"
+        )
+        .order("created_at", { ascending: false });
 
       if (error) {
-        console.error("Error fetching projects:", error);
+        console.error("❌ Error fetching properties:", error);
       } else {
         setProjects(data || []);
       }
     };
-    fetchProjects();
+
+    fetchProperties();
   }, []);
 
-  // Filter logic: Email, Site Address, Project Area
+  // 🔍 Search filter
   const filteredProjects = projects.filter((project) => {
-    const clientEmail = project.clients?.email || "";
-    const siteAddress = project.site_address || "";
-    const projectArea = project.project_area?.toString() || "";
-
     const term = searchTerm.toLowerCase();
     return (
-      clientEmail.toLowerCase().includes(term) ||
-      siteAddress.toLowerCase().includes(term) ||
-      projectArea.toLowerCase().includes(term)
+      project.client_name?.toLowerCase().includes(term) ||
+      project.site_address?.toLowerCase().includes(term) ||
+      project.city?.toLowerCase().includes(term) ||
+      (project.project_area?.toString() || "").includes(term)
     );
   });
 
+  // 🗑️ Delete project
   const handleDelete = async (id) => {
-    const { error } = await supabase.from("projects").delete().eq("id", id);
+    const confirmDelete = window.confirm("Are you sure you want to delete this project?");
+    if (!confirmDelete) return;
+
+    const { error } = await supabase.from("properties").delete().eq("id", id);
     if (!error) {
       setProjects(projects.filter((p) => p.id !== id));
     } else {
-      console.error("Delete failed:", error);
+      console.error("❌ Delete failed:", error);
+      alert("Failed to delete project.");
     }
   };
 
-  const navigate = useNavigate();
-  
+  // ➕ Add new project
   const handleAddNew = () => {
     navigate("/projects/new");
   };
@@ -99,13 +100,13 @@ export default function ProjectsDashboard() {
           </button>
         </div>
 
-        {/* Search */}
+        {/* Search Bar */}
         <div className="mb-4 flex items-center gap-4">
           <div className="relative flex-1 max-w-xs">
             <Search size={18} className="absolute left-3 top-3 text-gray-400" />
             <input
               type="text"
-              placeholder="Search by Email, Site Address, or Project Area"
+              placeholder="Search by Client, Address, or City"
               value={searchTerm}
               onChange={(e) => setSearchTerm(e.target.value)}
               className="w-full pl-10 pr-4 py-2 border border-gray-300 rounded focus:outline-none focus:ring-2 focus:ring-orange-400"
@@ -118,36 +119,49 @@ export default function ProjectsDashboard() {
           <table className="w-full text-sm">
             <thead>
               <tr className="border-b bg-gray-50">
-                <th className="px-6 py-3 text-left font-semibold text-gray-700">Client Email</th>
-                <th className="px-6 py-3 text-left font-semibold text-gray-700">Site Address</th>
-                <th className="px-6 py-3 text-left font-semibold text-gray-700">Project Area</th>
-                <th className="px-6 py-3 text-left font-semibold text-gray-700">Status</th>
-                <th className="px-6 py-3 text-left font-semibold text-gray-700">Created At</th>
-                <th className="px-6 py-3 text-center font-semibold text-gray-700">Action</th>
+                <th className="px-6 py-3 text-left font-semibold text-gray-700">
+                  Client Name
+                </th>
+                <th className="px-6 py-3 text-left font-semibold text-gray-700">
+                  Site Address
+                </th>
+                <th className="px-6 py-3 text-left font-semibold text-gray-700">
+                  City
+                </th>
+                <th className="px-6 py-3 text-left font-semibold text-gray-700">
+                  Project Area
+                </th>
+                <th className="px-6 py-3 text-left font-semibold text-gray-700">
+                  Project Cost
+                </th>
+                <th className="px-6 py-3 text-left font-semibold text-gray-700">
+                  Created At
+                </th>
+                <th className="px-6 py-3 text-center font-semibold text-gray-700">
+                  Action
+                </th>
               </tr>
             </thead>
+
             <tbody>
               {filteredProjects.length > 0 ? (
-                filteredProjects.map((project) => (
-                  <tr key={project.id} className="border-b hover:bg-gray-50">
-                    <td className="px-6 py-4 text-gray-900">
-                      {project.clients?.email || "-"}
+                filteredProjects.map((p) => (
+                  <tr key={p.id} className="border-b hover:bg-gray-50">
+                    <td className="px-6 py-4 text-gray-900">{p.client_name}</td>
+                    <td className="px-6 py-4 text-gray-600">{p.site_address}</td>
+                    <td className="px-6 py-4 text-gray-600">{p.city || "-"}</td>
+                    <td className="px-6 py-4 text-gray-600">{p.project_area || "-"}</td>
+                    <td className="px-6 py-4 text-gray-600">
+                      {p.project_cost
+                        ? `${p.project_cost} ${p.currency || ""}`
+                        : "-"}
                     </td>
                     <td className="px-6 py-4 text-gray-600">
-                      {project.site_address || "-"}
-                    </td>
-                    <td className="px-6 py-4 text-gray-600">
-                      {project.project_area || "-"}
-                    </td>
-                    <td className="px-6 py-4 text-gray-600">
-                      {project.status || "Proposed"}
-                    </td>
-                    <td className="px-6 py-4 text-gray-600">
-                      {new Date(project.created_at).toLocaleDateString()}
+                      {new Date(p.created_at).toLocaleDateString()}
                     </td>
                     <td className="px-6 py-4 text-center">
                       <button
-                        onClick={() => handleDelete(project.id)}
+                        onClick={() => handleDelete(p.id)}
                         className="text-red-500 hover:text-red-700 inline-flex items-center gap-2"
                       >
                         <Trash2 size={18} />
@@ -157,7 +171,7 @@ export default function ProjectsDashboard() {
                 ))
               ) : (
                 <tr>
-                  <td colSpan="6" className="px-6 py-8 text-center text-gray-500">
+                  <td colSpan="7" className="px-6 py-8 text-center text-gray-500">
                     No projects found
                   </td>
                 </tr>
