@@ -99,7 +99,10 @@ export default function Login() {
   const handleGoogleLogin = async () => {
     setMessage("Redirecting to Google...");
     try {
-      const redirectUrl = window.location.origin + "/dashboard";
+      // Prefer an explicit deploy URL from env (set VITE_APP_URL in Vercel),
+      // otherwise fall back to the current origin (works on localhost and production).
+      const redirectBase = import.meta.env.VITE_APP_URL || window.location.origin;
+      const redirectUrl = redirectBase + "/dashboard";
       const { error } = await supabase.auth.signInWithOAuth({ provider: "google", options: { redirectTo: redirectUrl } });
       if (error) throw error;
     } catch (error) {
