@@ -98,7 +98,7 @@ export default function ProjectsDashboard() {
         </div>
 
         {/* Tabs */}
-        <div className="flex gap-6 mb-6 border-b">
+        {/* <div className="flex gap-6 mb-6 border-b">
           <button
             onClick={() => setActiveTab("Active")}
             className={`pb-3 px-1 font-medium text-sm ${
@@ -119,7 +119,7 @@ export default function ProjectsDashboard() {
           >
             Archived
           </button>
-        </div>
+        </div> */}
 
         {/* Search + Filter */}
         <div className="mb-4 flex flex-col sm:flex-row sm:items-center gap-4">

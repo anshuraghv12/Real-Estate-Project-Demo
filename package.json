@@ -4,11 +4,11 @@
   "version": "0.0.0",
   "type": "module",
   "scripts": {
-    "dev": "vite",
-    "build": "vite build",
-    "lint": "eslint .",
-    "preview": "vite preview"
+  "dev": "vite --port 3000",
+  "build": "vite build",
+  "preview": "vite preview"
   },
+
   "dependencies": {
     "@supabase/supabase-js": "^2.75.0",
     "lucide-react": "^0.545.0",
