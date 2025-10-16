@@ -17,8 +17,13 @@ export default function Login() {
   const [loading, setLoading] = useState(false);
   const [message, setMessage] = useState("");
 
+  // Get redirect URL from environment or fallback
+  const redirectBase = import.meta.env.VITE_APP_URL || window.location.origin;
+  const redirectUrl = `${redirectBase}/dashboard`;
+
   useEffect(() => {
     let mounted = true;
+
     supabase.auth.getSession().then(({ data }) => {
       if (!mounted) return;
       if (data?.session) navigate("/dashboard");
@@ -42,6 +47,7 @@ export default function Login() {
 
     try {
       if (isSignUp) {
+        // Validate password match and name
         if (formData.password !== formData.confirmPassword) {
           setMessage("Passwords do not match!");
           setLoading(false);
@@ -53,35 +59,44 @@ export default function Login() {
           return;
         }
 
-        const { data: signUpData, error: signUpError } = await supabase.auth.signUp({
-          email: formData.email,
-          password: formData.password,
-        }, { data: { name: formData.name } });
+        // Sign up user with redirect for email confirmation
+        const { data: signUpData, error: signUpError } = await supabase.auth.signUp(
+          {
+            email: formData.email,
+            password: formData.password,
+          },
+          {
+            data: { name: formData.name },
+            redirectTo: redirectUrl, // <- Production-ready redirect
+          }
+        );
 
         if (signUpError) throw signUpError;
 
         const user = signUpData?.user ?? null;
         const session = signUpData?.session ?? null;
 
+        // Upsert profile
         if (user?.id) {
-          await supabase.from("profiles").upsert({
-            id: user.id,
-            email: user.email,
-            name: formData.name
-          }, { onConflict: "id" });
+          await supabase.from("profiles").upsert(
+            {
+              id: user.id,
+              email: user.email,
+              name: formData.name,
+            },
+            { onConflict: "id" }
+          );
         }
 
-        if (session) navigate("/dashboard");
-        else {
-          const { data: signInData, error: signInError } = await supabase.auth.signInWithPassword({
-            email: formData.email,
-            password: formData.password
-          });
-          if (signInError) setMessage("Account created. Please check your email to confirm.");
-          else navigate("/dashboard");
+        // If auto-login session exists, navigate
+        if (session) {
+          navigate("/dashboard");
+        } else {
+          // Inform user to check email for confirmation
+          setMessage("Account created. Please check your email to confirm.");
         }
-
       } else {
+        // Sign in with email/password
         const { data, error } = await supabase.auth.signInWithPassword({
           email: formData.email,
           password: formData.password,
@@ -99,40 +114,50 @@ export default function Login() {
   const handleGoogleLogin = async () => {
     setMessage("Redirecting to Google...");
     try {
-      // Prefer an explicit deploy URL from env (set VITE_APP_URL in Vercel),
-      // otherwise fall back to the current origin (works on localhost and production).
-      const redirectBase = import.meta.env.VITE_APP_URL || window.location.origin;
-      const redirectUrl = redirectBase + "/dashboard";
-      const { error } = await supabase.auth.signInWithOAuth({ provider: "google", options: { redirectTo: redirectUrl } });
+      const { error } = await supabase.auth.signInWithOAuth({
+        provider: "google",
+        options: { redirectTo: redirectUrl },
+      });
       if (error) throw error;
     } catch (error) {
-      setMessage(error.message || "Google sign-in failed");
+      setMessage(error?.message || "Google sign-in failed");
     }
   };
 
-  const handleKeyPress = (e) => { if (e.key === "Enter") handleSubmit(); };
+  const handleKeyPress = (e) => {
+    if (e.key === "Enter") handleSubmit();
+  };
 
   return (
     <div className="min-h-screen flex items-center justify-center bg-gray-50 p-4">
       <div className="relative w-full max-w-5xl h-[600px]">
         <div
-          className={`absolute inset-0 flex transition-all duration-700 ease-in-out ${isSignUp ? "flex-row-reverse" : "flex-row"}`}
+          className={`absolute inset-0 flex transition-all duration-700 ease-in-out ${
+            isSignUp ? "flex-row-reverse" : "flex-row"
+          }`}
         >
           {/* Left/Right Panel with Swap Animation */}
           <div
             className={`w-1/2 rounded-3xl shadow-2xl flex flex-col items-center justify-center text-white p-12 transition-all duration-700
-              ${isSignUp
-                ? "bg-gradient-to-br from-purple-700 via-purple-600 to-purple-500"
-                : "bg-gradient-to-br from-blue-600 via-blue-500 to-blue-400"}`}
+              ${
+                isSignUp
+                  ? "bg-gradient-to-br from-purple-700 via-purple-600 to-purple-500"
+                  : "bg-gradient-to-br from-blue-600 via-blue-500 to-blue-400"
+              }`}
           >
-            <h1 className="text-4xl font-bold mb-4">{isSignUp ? "Already a Client?" : "Welcome Back!"}</h1>
+            <h1 className="text-4xl font-bold mb-4">
+              {isSignUp ? "Already a Client?" : "Welcome Back!"}
+            </h1>
             <p className="text-center text-lg mb-8 opacity-90">
               {isSignUp
                 ? "Sign in to access your projects and manage your data"
                 : "Create an account to manage your projects and track progress"}
             </p>
             <button
-              onClick={() => { setIsSignUp(!isSignUp); setMessage(""); }}
+              onClick={() => {
+                setIsSignUp(!isSignUp);
+                setMessage("");
+              }}
               className="px-12 py-3 border-2 border-white rounded-full text-white font-semibold hover:bg-white hover:text-blue-600 transition-all duration-300"
             >
               {isSignUp ? "SIGN IN" : "SIGN UP"}
@@ -142,7 +167,9 @@ export default function Login() {
           {/* Form Panel */}
           <div className="w-1/2 bg-white rounded-3xl shadow-2xl flex items-center justify-center p-12">
             <div className="w-full max-w-md">
-              <h2 className="text-3xl font-bold mb-6 text-center">{isSignUp ? "Client Registration" : "Client Login"}</h2>
+              <h2 className="text-3xl font-bold mb-6 text-center">
+                {isSignUp ? "Client Registration" : "Client Login"}
+              </h2>
 
               {!isSignUp && (
                 <div className="mb-6">
@@ -157,16 +184,16 @@ export default function Login() {
                       <div className="w-full border-t border-gray-300"></div>
                     </div>
                     <div className="relative flex justify-center text-sm">
-                      <span className="px-4 bg-white text-gray-500">or use your email & password</span>
+                      <span className="px-4 bg-white text-gray-500">
+                        or use your email & password
+                      </span>
                     </div>
                   </div>
                 </div>
               )}
 
               {isSignUp && (
-                <p className="text-center text-gray-600 mb-6 text-sm">
-                  or register with your email
-                </p>
+                <p className="text-center text-gray-600 mb-6 text-sm">or register with your email</p>
               )}
 
               <div className="space-y-4">
@@ -252,7 +279,11 @@ export default function Login() {
                 </button>
 
                 {message && (
-                  <p className={`text-center text-sm ${message.toLowerCase().includes("success") ? "text-green-600" : "text-red-600"}`}>
+                  <p
+                    className={`text-center text-sm ${
+                      message.toLowerCase().includes("success") ? "text-green-600" : "text-red-600"
+                    }`}
+                  >
                     {message}
                   </p>
                 )}
