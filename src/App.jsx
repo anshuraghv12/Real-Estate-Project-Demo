@@ -2,7 +2,7 @@
 import { useEffect } from "react";
 import { BrowserRouter, Routes, Route, useNavigate } from "react-router-dom";
 import { supabase } from "./lib/supabaseClient";
-
+import ResetPassword from "./pages/ResetPassword";
 import Login from "./pages/Login";
 import Dashboard from "./pages/Dashboard";
 import CreateProject from "./pages/projects/CreateProject";
@@ -12,7 +12,7 @@ function AuthHandler() {
   const navigate = useNavigate();
 
   useEffect(() => {
-    // 1️⃣ Handle hash fragment (Google OAuth redirect)
+    
     const hash = window.location.hash;
     if (hash && hash.includes("access_token")) {
       supabase.auth
@@ -26,7 +26,7 @@ function AuthHandler() {
         });
     }
 
-    // 2️⃣ Handle state change if logged in later
+    
     const { data: listener } = supabase.auth.onAuthStateChange(
       async (event, session) => {
         if (event === "SIGNED_IN") navigate("/dashboard");
@@ -46,10 +46,12 @@ export default function App() {
     <BrowserRouter>
       <AuthHandler />
       <Routes>
+        
         <Route path="/" element={<Login />} />
         <Route path="/dashboard" element={<Dashboard />} />
         <Route path="/projects/new" element={<CreateProject />} />
         <Route path="/projects" element={<ProjectsList />} />
+        <Route path="/reset-password" element={<ResetPassword />} />
       </Routes>
     </BrowserRouter>
   );

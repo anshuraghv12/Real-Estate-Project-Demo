@@ -39,7 +39,8 @@ export default function Login() {
     };
   }, [navigate]);
 
-  const handleInputChange = (e) => setFormData({ ...formData, [e.target.name]: e.target.value });
+  const handleInputChange = (e) =>
+    setFormData({ ...formData, [e.target.name]: e.target.value });
 
   const handleSubmit = async () => {
     setLoading(true);
@@ -47,7 +48,6 @@ export default function Login() {
 
     try {
       if (isSignUp) {
-        // Validate password match and name
         if (formData.password !== formData.confirmPassword) {
           setMessage("Passwords do not match!");
           setLoading(false);
@@ -59,7 +59,6 @@ export default function Login() {
           return;
         }
 
-        // Sign up user with redirect for email confirmation
         const { data: signUpData, error: signUpError } = await supabase.auth.signUp(
           {
             email: formData.email,
@@ -67,7 +66,7 @@ export default function Login() {
           },
           {
             data: { name: formData.name },
-            redirectTo: redirectUrl, // <- Production-ready redirect
+            redirectTo: redirectUrl,
           }
         );
 
@@ -76,7 +75,6 @@ export default function Login() {
         const user = signUpData?.user ?? null;
         const session = signUpData?.session ?? null;
 
-        // Upsert profile
         if (user?.id) {
           await supabase.from("profiles").upsert(
             {
@@ -88,15 +86,12 @@ export default function Login() {
           );
         }
 
-        // If auto-login session exists, navigate
         if (session) {
           navigate("/dashboard");
         } else {
-          // Inform user to check email for confirmation
           setMessage("Account created. Please check your email to confirm.");
         }
       } else {
-        // Sign in with email/password
         const { data, error } = await supabase.auth.signInWithPassword({
           email: formData.email,
           password: formData.password,
@@ -121,6 +116,28 @@ export default function Login() {
       if (error) throw error;
     } catch (error) {
       setMessage(error?.message || "Google sign-in failed");
+    }
+  };
+
+  const handleForgotPassword = async () => {
+    if (!formData.email) {
+      setMessage("Please enter your email to reset password.");
+      return;
+    }
+
+    setLoading(true);
+    setMessage("Sending reset link...");
+
+    try {
+      const { error } = await supabase.auth.resetPasswordForEmail(formData.email, {
+        redirectTo: `${redirectBase}/reset-password`,
+      });
+      if (error) throw error;
+      setMessage("Password reset email sent. Please check your inbox.");
+    } catch (error) {
+      setMessage(error?.message || "Failed to send reset email.");
+    } finally {
+      setLoading(false);
     }
   };
 
@@ -260,9 +277,10 @@ export default function Login() {
                 )}
 
                 {!isSignUp && (
-                  <div className="text-right">
+                  <div className="text-right mb-4">
                     <button
                       type="button"
+                      onClick={handleForgotPassword}
                       className="text-sm text-gray-600 hover:text-blue-600 transition-colors"
                     >
                       Forgot your password?
