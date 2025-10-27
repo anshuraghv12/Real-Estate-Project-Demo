@@ -24,23 +24,94 @@ export default function Login() {
   useEffect(() => {
     let mounted = true;
 
-    supabase.auth.getSession().then(({ data }) => {
-      if (!mounted) return;
-      if (data?.session) navigate("/dashboard");
-    });
+    // If already signed in, go to dashboard
+    const init = async () => {
+      try {
+        const { data } = await supabase.auth.getSession();
+        if (!mounted) return;
+        if (data?.session) {
+          // session exists -> navigate to dashboard
+          navigate("/dashboard");
+        }
+      } catch (err) {
+        console.error("Error checking session:", err);
+      }
+    };
+    init();
 
-    const { data: listener } = supabase.auth.onAuthStateChange((event, session) => {
-      if (event === "SIGNED_IN" && session) navigate("/dashboard");
+    // Listen for auth state changes (handles OAuth redirects)
+    const { data: listener } = supabase.auth.onAuthStateChange(async (event, session) => {
+      try {
+        if (event === "SIGNED_IN" && session?.user) {
+          // Ensure profile exists/upsert
+          const u = session.user;
+          const nameFromMeta =
+            u.user_metadata?.full_name ||
+            u.user_metadata?.name ||
+            u.user_metadata?.given_name ||
+            formData.name ||
+            null;
+
+          // upsert profile with default role 'user' if not set
+          await supabase.from("profiles").upsert(
+            {
+              id: u.id,
+              email: u.email,
+              name: nameFromMeta,
+              role: "user",
+            },
+            { onConflict: "id" }
+          );
+
+          // finally navigate
+          navigate("/dashboard");
+        }
+      } catch (err) {
+        console.error("Auth state change handling error:", err);
+      }
     });
 
     return () => {
       mounted = false;
       if (listener?.subscription) listener.subscription.unsubscribe();
     };
-  }, [navigate]);
+  }, [navigate, formData.name]);
 
   const handleInputChange = (e) =>
     setFormData({ ...formData, [e.target.name]: e.target.value });
+
+  // helper to ensure profile exists (called after email/password sign-in)
+  const ensureProfile = async (user, name) => {
+    if (!user?.id) return;
+    try {
+      // try fetch
+      const { data: existing, error: fetchErr } = await supabase
+        .from("profiles")
+        .select("id, role")
+        .eq("id", user.id)
+        .single();
+
+      if (fetchErr && fetchErr.code !== "PGRST116") {
+        // If fetch error other than "No rows", log it
+        // note: PGRST116 is "result not found" code from PostgREST; safe to ignore
+        // but we won't block user for this.
+        console.warn("Profile fetch warning:", fetchErr);
+      }
+
+      // upsert if not exists
+      await supabase.from("profiles").upsert(
+        {
+          id: user.id,
+          email: user.email,
+          name: name || user.user_metadata?.name || "",
+          role: existing?.role || "user",
+        },
+        { onConflict: "id" }
+      );
+    } catch (err) {
+      console.error("ensureProfile error:", err);
+    }
+  };
 
   const handleSubmit = async () => {
     setLoading(true);
@@ -48,6 +119,7 @@ export default function Login() {
 
     try {
       if (isSignUp) {
+        // validations
         if (formData.password !== formData.confirmPassword) {
           setMessage("Passwords do not match!");
           setLoading(false);
@@ -58,7 +130,13 @@ export default function Login() {
           setLoading(false);
           return;
         }
+        if (!formData.email?.trim()) {
+          setMessage("Please enter a valid email.");
+          setLoading(false);
+          return;
+        }
 
+        // Sign up user with redirect for email confirmation
         const { data: signUpData, error: signUpError } = await supabase.auth.signUp(
           {
             email: formData.email,
@@ -75,32 +153,48 @@ export default function Login() {
         const user = signUpData?.user ?? null;
         const session = signUpData?.session ?? null;
 
+        // Upsert profile with default role 'user'
         if (user?.id) {
           await supabase.from("profiles").upsert(
             {
               id: user.id,
               email: user.email,
               name: formData.name,
+              role: "user",
             },
             { onConflict: "id" }
           );
         }
 
         if (session) {
+          // If signed in immediately (rare with email verification), ensure profile and redirect
+          await ensureProfile(user, formData.name);
           navigate("/dashboard");
         } else {
-          setMessage("Account created. Please check your email to confirm.");
+          // Email verification flow - show message
+          setMessage("Account created. Please check your email to confirm (link will open the dashboard).");
         }
       } else {
+        // Sign in with email/password
         const { data, error } = await supabase.auth.signInWithPassword({
           email: formData.email,
           password: formData.password,
         });
         if (error) throw error;
-        if (data?.user) navigate("/dashboard");
+
+        const user = data?.user ?? null;
+        if (user) {
+          // ensure profile exists (and create if missing)
+          await ensureProfile(user, formData.name);
+          navigate("/dashboard");
+        } else {
+          setMessage("Login succeeded but no user session found.");
+        }
       }
     } catch (error) {
+      // supabase v2 errors often have .message
       setMessage(error?.message || "Authentication failed.");
+      console.error("Auth error:", error);
     } finally {
       setLoading(false);
     }
@@ -108,14 +202,19 @@ export default function Login() {
 
   const handleGoogleLogin = async () => {
     setMessage("Redirecting to Google...");
+    setLoading(true);
     try {
       const { error } = await supabase.auth.signInWithOAuth({
         provider: "google",
         options: { redirectTo: redirectUrl },
       });
       if (error) throw error;
+      // OAuth will redirect the user away; on return, onAuthStateChange handler will upsert profile and navigate.
     } catch (error) {
       setMessage(error?.message || "Google sign-in failed");
+      console.error("Google sign-in error:", error);
+    } finally {
+      setLoading(false);
     }
   };
 
@@ -136,6 +235,7 @@ export default function Login() {
       setMessage("Password reset email sent. Please check your inbox.");
     } catch (error) {
       setMessage(error?.message || "Failed to send reset email.");
+      console.error("Reset password error:", error);
     } finally {
       setLoading(false);
     }
@@ -299,7 +399,9 @@ export default function Login() {
                 {message && (
                   <p
                     className={`text-center text-sm ${
-                      message.toLowerCase().includes("success") ? "text-green-600" : "text-red-600"
+                      message.toLowerCase().includes("success") || message.toLowerCase().includes("check")
+                        ? "text-green-600"
+                        : "text-red-600"
                     }`}
                   >
                     {message}
