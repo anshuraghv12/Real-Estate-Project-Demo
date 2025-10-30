@@ -16,10 +16,21 @@ export default function Login() {
   });
   const [loading, setLoading] = useState(false);
   const [message, setMessage] = useState("");
+  const [messageType, setMessageType] = useState(""); // success, error, info
 
   // Get redirect URL from environment or fallback
   const redirectBase = import.meta.env.VITE_APP_URL || window.location.origin;
   const redirectUrl = `${redirectBase}/dashboard`;
+
+  // Show message helper
+  const showMessage = (msg, type = "info") => {
+    setMessage(msg);
+    setMessageType(type);
+    setTimeout(() => {
+      setMessage("");
+      setMessageType("");
+    }, 6000);
+  };
 
   useEffect(() => {
     let mounted = true;
@@ -30,7 +41,6 @@ export default function Login() {
         const { data } = await supabase.auth.getSession();
         if (!mounted) return;
         if (data?.session) {
-          // session exists -> navigate to dashboard
           navigate("/dashboard");
         }
       } catch (err) {
@@ -43,7 +53,6 @@ export default function Login() {
     const { data: listener } = supabase.auth.onAuthStateChange(async (event, session) => {
       try {
         if (event === "SIGNED_IN" && session?.user) {
-          // Ensure profile exists/upsert
           const u = session.user;
           const nameFromMeta =
             u.user_metadata?.full_name ||
@@ -63,7 +72,6 @@ export default function Login() {
             { onConflict: "id" }
           );
 
-          // finally navigate
           navigate("/dashboard");
         }
       } catch (err) {
@@ -80,25 +88,16 @@ export default function Login() {
   const handleInputChange = (e) =>
     setFormData({ ...formData, [e.target.name]: e.target.value });
 
-  // helper to ensure profile exists (called after email/password sign-in)
+  // helper to ensure profile exists
   const ensureProfile = async (user, name) => {
     if (!user?.id) return;
     try {
-      // try fetch
-      const { data: existing, error: fetchErr } = await supabase
+      const { data: existing } = await supabase
         .from("profiles")
         .select("id, role")
         .eq("id", user.id)
         .single();
 
-      if (fetchErr && fetchErr.code !== "PGRST116") {
-        // If fetch error other than "No rows", log it
-        // note: PGRST116 is "result not found" code from PostgREST; safe to ignore
-        // but we won't block user for this.
-        console.warn("Profile fetch warning:", fetchErr);
-      }
-
-      // upsert if not exists
       await supabase.from("profiles").upsert(
         {
           id: user.id,
@@ -119,34 +118,37 @@ export default function Login() {
 
     try {
       if (isSignUp) {
-        // validations
-        if (formData.password !== formData.confirmPassword) {
-          setMessage("Passwords do not match!");
-          setLoading(false);
-          return;
-        }
+        // Validations
         if (!formData.name?.trim()) {
-          setMessage("Please enter your full name.");
+          showMessage("Please enter your full name.", "error");
           setLoading(false);
           return;
         }
         if (!formData.email?.trim()) {
-          setMessage("Please enter a valid email.");
+          showMessage("Please enter a valid email.", "error");
+          setLoading(false);
+          return;
+        }
+        if (formData.password.length < 6) {
+          showMessage("Password must be at least 6 characters.", "error");
+          setLoading(false);
+          return;
+        }
+        if (formData.password !== formData.confirmPassword) {
+          showMessage("Passwords do not match!", "error");
           setLoading(false);
           return;
         }
 
-        // Sign up user with redirect for email confirmation
-        const { data: signUpData, error: signUpError } = await supabase.auth.signUp(
-          {
-            email: formData.email,
-            password: formData.password,
-          },
-          {
+        // Sign up user
+        const { data: signUpData, error: signUpError } = await supabase.auth.signUp({
+          email: formData.email,
+          password: formData.password,
+          options: {
             data: { name: formData.name },
-            redirectTo: redirectUrl,
-          }
-        );
+            emailRedirectTo: redirectUrl,
+          },
+        });
 
         if (signUpError) throw signUpError;
 
@@ -167,33 +169,38 @@ export default function Login() {
         }
 
         if (session) {
-          // If signed in immediately (rare with email verification), ensure profile and redirect
           await ensureProfile(user, formData.name);
-          navigate("/dashboard");
+          showMessage("Account created successfully!", "success");
+          setTimeout(() => navigate("/dashboard"), 1000);
         } else {
-          // Email verification flow - show message
-          setMessage("Account created. Please check your email to confirm (link will open the dashboard).");
+          showMessage("Account created! Please check your email to verify your account.", "success");
         }
       } else {
-        // Sign in with email/password
+        // Sign in
+        if (!formData.email?.trim() || !formData.password?.trim()) {
+          showMessage("Please enter email and password.", "error");
+          setLoading(false);
+          return;
+        }
+
         const { data, error } = await supabase.auth.signInWithPassword({
           email: formData.email,
           password: formData.password,
         });
+        
         if (error) throw error;
 
         const user = data?.user ?? null;
         if (user) {
-          // ensure profile exists (and create if missing)
           await ensureProfile(user, formData.name);
-          navigate("/dashboard");
+          showMessage("Login successful!", "success");
+          setTimeout(() => navigate("/dashboard"), 500);
         } else {
-          setMessage("Login succeeded but no user session found.");
+          showMessage("Login succeeded but no user session found.", "error");
         }
       }
     } catch (error) {
-      // supabase v2 errors often have .message
-      setMessage(error?.message || "Authentication failed.");
+      showMessage(error?.message || "Authentication failed.", "error");
       console.error("Auth error:", error);
     } finally {
       setLoading(false);
@@ -201,7 +208,7 @@ export default function Login() {
   };
 
   const handleGoogleLogin = async () => {
-    setMessage("Redirecting to Google...");
+    showMessage("Redirecting to Google...", "info");
     setLoading(true);
     try {
       const { error } = await supabase.auth.signInWithOAuth({
@@ -209,32 +216,30 @@ export default function Login() {
         options: { redirectTo: redirectUrl },
       });
       if (error) throw error;
-      // OAuth will redirect the user away; on return, onAuthStateChange handler will upsert profile and navigate.
     } catch (error) {
-      setMessage(error?.message || "Google sign-in failed");
+      showMessage(error?.message || "Google sign-in failed", "error");
       console.error("Google sign-in error:", error);
-    } finally {
       setLoading(false);
     }
   };
 
   const handleForgotPassword = async () => {
-    if (!formData.email) {
-      setMessage("Please enter your email to reset password.");
+    if (!formData.email?.trim()) {
+      showMessage("Please enter your email to reset password.", "error");
       return;
     }
 
     setLoading(true);
-    setMessage("Sending reset link...");
+    showMessage("Sending reset link...", "info");
 
     try {
       const { error } = await supabase.auth.resetPasswordForEmail(formData.email, {
         redirectTo: `${redirectBase}/reset-password`,
       });
       if (error) throw error;
-      setMessage("Password reset email sent. Please check your inbox.");
+      showMessage("Password reset email sent! Please check your inbox.", "success");
     } catch (error) {
-      setMessage(error?.message || "Failed to send reset email.");
+      showMessage(error?.message || "Failed to send reset email.", "error");
       console.error("Reset password error:", error);
     } finally {
       setLoading(false);
@@ -246,8 +251,8 @@ export default function Login() {
   };
 
   return (
-    <div className="min-h-screen flex items-center justify-center bg-gray-50 p-4">
-      <div className="relative w-full max-w-5xl h-[600px]">
+    <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-blue-50 via-indigo-50 to-purple-50 p-4">
+      <div className="relative w-full max-w-5xl h-[650px]">
         <div
           className={`absolute inset-0 flex transition-all duration-700 ease-in-out ${
             isSignUp ? "flex-row-reverse" : "flex-row"
@@ -258,51 +263,61 @@ export default function Login() {
             className={`w-1/2 rounded-3xl shadow-2xl flex flex-col items-center justify-center text-white p-12 transition-all duration-700
               ${
                 isSignUp
-                  ? "bg-gradient-to-br from-purple-700 via-purple-600 to-purple-500"
-                  : "bg-gradient-to-br from-blue-600 via-blue-500 to-blue-400"
+                  ? "bg-gradient-to-br from-purple-600 via-purple-500 to-indigo-500"
+                  : "bg-gradient-to-br from-blue-600 via-indigo-600 to-purple-600"
               }`}
           >
-            <h1 className="text-4xl font-bold mb-4">
-              {isSignUp ? "Already a Client?" : "Welcome Back!"}
-            </h1>
-            <p className="text-center text-lg mb-8 opacity-90">
-              {isSignUp
-                ? "Sign in to access your projects and manage your data"
-                : "Create an account to manage your projects and track progress"}
-            </p>
-            <button
-              onClick={() => {
-                setIsSignUp(!isSignUp);
-                setMessage("");
-              }}
-              className="px-12 py-3 border-2 border-white rounded-full text-white font-semibold hover:bg-white hover:text-blue-600 transition-all duration-300"
-            >
-              {isSignUp ? "SIGN IN" : "SIGN UP"}
-            </button>
+            <div className="text-center space-y-6">
+              <h1 className="text-5xl font-bold">
+                {isSignUp ? "Already a Client?" : "Welcome Back!"}
+              </h1>
+              <p className="text-lg opacity-90 max-w-md mx-auto leading-relaxed">
+                {isSignUp
+                  ? "Sign in to access your projects and manage your data seamlessly"
+                  : "Create an account to start managing your projects and tracking progress efficiently"}
+              </p>
+              <button
+                onClick={() => {
+                  setIsSignUp(!isSignUp);
+                  setMessage("");
+                  setMessageType("");
+                }}
+                className="mt-8 px-10 py-3.5 border-2 border-white rounded-full text-white font-semibold hover:bg-white hover:text-indigo-600 transition-all duration-300 shadow-lg hover:shadow-xl transform hover:scale-105"
+              >
+                {isSignUp ? "SIGN IN" : "SIGN UP"}
+              </button>
+            </div>
           </div>
 
           {/* Form Panel */}
           <div className="w-1/2 bg-white rounded-3xl shadow-2xl flex items-center justify-center p-12">
             <div className="w-full max-w-md">
-              <h2 className="text-3xl font-bold mb-6 text-center">
-                {isSignUp ? "Client Registration" : "Client Login"}
+              <h2 className="text-3xl font-bold mb-8 text-center text-gray-800">
+                {isSignUp ? "Create Account" : "Sign In"}
               </h2>
 
               {!isSignUp && (
-                <div className="mb-6">
+                <div className="mb-8">
                   <button
                     onClick={handleGoogleLogin}
-                    className="w-full flex items-center justify-center gap-3 px-6 py-3 border-2 border-gray-300 rounded-lg hover:bg-gray-50 transition-all duration-200"
+                    disabled={loading}
+                    className="w-full flex items-center justify-center gap-3 px-6 py-3.5 border-2 border-gray-300 rounded-xl hover:bg-gray-50 hover:border-gray-400 transition-all duration-200 shadow-sm hover:shadow disabled:opacity-50"
                   >
-                    <span className="font-medium text-gray-700">Sign in with Google</span>
+                    <svg className="w-5 h-5" viewBox="0 0 24 24">
+                      <path fill="#4285F4" d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z"/>
+                      <path fill="#34A853" d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z"/>
+                      <path fill="#FBBC05" d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.07H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.93l2.85-2.22.81-.62z"/>
+                      <path fill="#EA4335" d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.07l3.66 2.84c.87-2.6 3.3-4.53 6.16-4.53z"/>
+                    </svg>
+                    <span className="font-medium text-gray-700">Continue with Google</span>
                   </button>
-                  <div className="relative my-6">
+                  <div className="relative my-8">
                     <div className="absolute inset-0 flex items-center">
                       <div className="w-full border-t border-gray-300"></div>
                     </div>
                     <div className="relative flex justify-center text-sm">
-                      <span className="px-4 bg-white text-gray-500">
-                        or use your email & password
+                      <span className="px-4 bg-white text-gray-500 font-medium">
+                        Or continue with email
                       </span>
                     </div>
                   </div>
@@ -310,80 +325,92 @@ export default function Login() {
               )}
 
               {isSignUp && (
-                <p className="text-center text-gray-600 mb-6 text-sm">or register with your email</p>
+                <p className="text-center text-gray-600 mb-6 text-sm">Fill in your details to get started</p>
               )}
 
-              <div className="space-y-4">
+              <div className="space-y-5">
                 {isSignUp && (
-                  <input
-                    type="text"
-                    name="name"
-                    placeholder="Full Name"
-                    value={formData.name}
-                    onChange={handleInputChange}
-                    onKeyPress={handleKeyPress}
-                    className="w-full px-4 py-3 bg-gray-100 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
-                  />
-                )}
-
-                <input
-                  type="email"
-                  name="email"
-                  placeholder="Email"
-                  value={formData.email}
-                  onChange={handleInputChange}
-                  onKeyPress={handleKeyPress}
-                  className="w-full px-4 py-3 bg-gray-100 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
-                />
-
-                <div className="relative">
-                  <input
-                    type={showPassword ? "text" : "password"}
-                    name="password"
-                    placeholder="Password"
-                    value={formData.password}
-                    onChange={handleInputChange}
-                    onKeyPress={handleKeyPress}
-                    className="w-full px-4 py-3 bg-gray-100 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
-                  />
-                  <button
-                    type="button"
-                    onClick={() => setShowPassword(!showPassword)}
-                    className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-500"
-                  >
-                    {showPassword ? <EyeOff size={20} /> : <Eye size={20} />}
-                  </button>
-                </div>
-
-                {isSignUp && (
-                  <div className="relative">
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-2">Full Name</label>
                     <input
-                      type={showConfirmPassword ? "text" : "password"}
-                      name="confirmPassword"
-                      placeholder="Confirm Password"
-                      value={formData.confirmPassword}
+                      type="text"
+                      name="name"
+                      placeholder="Enter your full name"
+                      value={formData.name}
                       onChange={handleInputChange}
                       onKeyPress={handleKeyPress}
-                      className="w-full px-4 py-3 bg-gray-100 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+                      className="w-full px-4 py-3.5 bg-gray-50 border border-gray-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:bg-white transition-all"
+                    />
+                  </div>
+                )}
+
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-2">Email Address</label>
+                  <input
+                    type="email"
+                    name="email"
+                    placeholder="you@example.com"
+                    value={formData.email}
+                    onChange={handleInputChange}
+                    onKeyPress={handleKeyPress}
+                    className="w-full px-4 py-3.5 bg-gray-50 border border-gray-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:bg-white transition-all"
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-2">Password</label>
+                  <div className="relative">
+                    <input
+                      type={showPassword ? "text" : "password"}
+                      name="password"
+                      placeholder="Enter your password"
+                      value={formData.password}
+                      onChange={handleInputChange}
+                      onKeyPress={handleKeyPress}
+                      className="w-full px-4 py-3.5 bg-gray-50 border border-gray-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:bg-white transition-all"
                     />
                     <button
                       type="button"
-                      onClick={() => setShowConfirmPassword(!showConfirmPassword)}
-                      className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-500"
+                      onClick={() => setShowPassword(!showPassword)}
+                      className="absolute right-4 top-1/2 -translate-y-1/2 text-gray-500 hover:text-gray-700"
                     >
-                      {showConfirmPassword ? <EyeOff size={20} /> : <Eye size={20} />}
+                      {showPassword ? <EyeOff size={20} /> : <Eye size={20} />}
                     </button>
+                  </div>
+                </div>
+
+                {isSignUp && (
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-2">Confirm Password</label>
+                    <div className="relative">
+                      <input
+                        type={showConfirmPassword ? "text" : "password"}
+                        name="confirmPassword"
+                        placeholder="Re-enter your password"
+                        value={formData.confirmPassword}
+                        onChange={handleInputChange}
+                        onKeyPress={handleKeyPress}
+                        className="w-full px-4 py-3.5 bg-gray-50 border border-gray-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:bg-white transition-all"
+                      />
+                      <button
+                        type="button"
+                        onClick={() => setShowConfirmPassword(!showConfirmPassword)}
+                        className="absolute right-4 top-1/2 -translate-y-1/2 text-gray-500 hover:text-gray-700"
+                      >
+                        {showConfirmPassword ? <EyeOff size={20} /> : <Eye size={20} />}
+                      </button>
+                    </div>
                   </div>
                 )}
 
                 {!isSignUp && (
-                  <div className="text-right mb-4">
+                  <div className="text-right">
                     <button
                       type="button"
                       onClick={handleForgotPassword}
-                      className="text-sm text-gray-600 hover:text-blue-600 transition-colors"
+                      className="text-sm text-indigo-600 hover:text-indigo-700 font-medium transition-colors"
                     >
-                      Forgot your password?
+                      Forgot password?
                     </button>
                   </div>
                 )}
@@ -391,21 +418,23 @@ export default function Login() {
                 <button
                   onClick={handleSubmit}
                   disabled={loading}
-                  className="w-full py-3 bg-gradient-to-r from-blue-600 to-blue-700 text-white font-semibold rounded-lg hover:from-blue-700 hover:to-blue-800 transition-all duration-300 disabled:opacity-50"
+                  className="w-full py-3.5 bg-gradient-to-r from-indigo-600 to-purple-600 text-white font-semibold rounded-xl hover:from-indigo-700 hover:to-purple-700 transition-all duration-300 disabled:opacity-50 shadow-lg hover:shadow-xl transform hover:scale-[1.02] active:scale-[0.98]"
                 >
-                  {loading ? "Processing..." : isSignUp ? "REGISTER" : "LOGIN"}
+                  {loading ? "Processing..." : isSignUp ? "CREATE ACCOUNT" : "SIGN IN"}
                 </button>
 
                 {message && (
-                  <p
-                    className={`text-center text-sm ${
-                      message.toLowerCase().includes("success") || message.toLowerCase().includes("check")
-                        ? "text-green-600"
-                        : "text-red-600"
+                  <div
+                    className={`p-4 rounded-xl text-sm text-center font-medium ${
+                      messageType === "success"
+                        ? "bg-green-50 text-green-700 border border-green-200"
+                        : messageType === "error"
+                        ? "bg-red-50 text-red-700 border border-red-200"
+                        : "bg-blue-50 text-blue-700 border border-blue-200"
                     }`}
                   >
                     {message}
-                  </p>
+                  </div>
                 )}
               </div>
             </div>

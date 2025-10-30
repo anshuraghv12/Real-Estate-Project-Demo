@@ -1,16 +1,7 @@
 import React, { useEffect, useState } from "react";
-import { Search, Plus, Trash2, LogOut, X } from "lucide-react";
+import { Search, Plus, Trash2, LogOut, X, Filter, Building2, Mail, MapPin, AlertCircle } from "lucide-react";
 import { supabase } from "../lib/supabaseClient";
 import { useNavigate } from "react-router-dom";
-
-/*
-  ProjectsDashboard
-  - Drawer for creating project (with client_email)
-  - Toast notifications (simple implementation)
-  - Advanced filters for project_area (<, =, >)
-  - Access control: admin sees all, normal users see only their projects
-  - Improved logout with confirmation + toast
-*/
 
 export default function ProjectsDashboard() {
   const [projects, setProjects] = useState([]);
@@ -18,8 +9,8 @@ export default function ProjectsDashboard() {
 
   // Search & filter related
   const [searchTerm, setSearchTerm] = useState("");
-  const [filterBy, setFilterBy] = useState("client_email"); // default now email
-  const [areaOperator, setAreaOperator] = useState("eq"); // eq, lt, gt
+  const [filterBy, setFilterBy] = useState("client_email");
+  const [areaOperator, setAreaOperator] = useState("eq");
   const [areaValue, setAreaValue] = useState("");
 
   // Pagination / UI
@@ -40,14 +31,14 @@ export default function ProjectsDashboard() {
 
   // Auth / user info
   const [user, setUser] = useState(null);
-  const [profile, setProfile] = useState(null); // to check role (admin/user)
+  const [profile, setProfile] = useState(null);
 
   // Toasts
   const [toasts, setToasts] = useState([]);
 
   const navigate = useNavigate();
 
-  // helper: show toast
+  // Enhanced toast with auto-dismiss
   const pushToast = (message, type = "info", ttl = 4000) => {
     const id = Date.now() + Math.random();
     setToasts((t) => [...t, { id, message, type }]);
@@ -56,7 +47,7 @@ export default function ProjectsDashboard() {
     }, ttl);
   };
 
-  // Get current user and profile, then fetch projects
+  // Initialize and fetch user data
   useEffect(() => {
     let mounted = true;
 
@@ -68,27 +59,26 @@ export default function ProjectsDashboard() {
         const currentUser = session?.user ?? null;
 
         if (!mounted) return;
+
+        if (!currentUser) {
+          navigate("/");
+          return;
+        }
+
         setUser(currentUser);
 
-        if (currentUser) {
-          // fetch profile to check role (assumes profiles table with id=auth.user.id and role field)
-          const { data: profileData, error: profileErr } = await supabase
-            .from("profiles")
-            .select("id, name, email, role")
-            .eq("id", currentUser.id)
-            .single();
+        // Fetch profile to check role
+        const { data: profileData, error: profileErr } = await supabase
+          .from("profiles")
+          .select("id, name, email, role")
+          .eq("id", currentUser.id)
+          .single();
 
-          if (!profileErr) setProfile(profileData);
-          else {
-            // not critical - push a toast
-            // console.log("No profile or error", profileErr);
-          }
-
-          // fetch projects based on role
+        if (!profileErr && profileData) {
+          setProfile(profileData);
           await fetchProjects(currentUser, profileData);
         } else {
-          // no user - redirect to login
-          navigate("/");
+          pushToast("Profile not found. Please contact support.", "error");
         }
       } catch (err) {
         console.error("Init error:", err);
@@ -103,15 +93,13 @@ export default function ProjectsDashboard() {
     return () => {
       mounted = false;
     };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [navigate]);
 
-  // Fetch projects with optional user-based filtering
+  // Fetch projects based on user role - FIXED ACCESS CONTROL
   const fetchProjects = async (currentUser = user, profileData = profile) => {
     try {
       setLoading(true);
-      // If profileData exists and role === 'admin', fetch all projects
-      // Otherwise, fetch only projects where client_email === current user's email or created_by === user.id
+      
       let query = supabase
         .from("properties")
         .select(
@@ -119,48 +107,61 @@ export default function ProjectsDashboard() {
         )
         .order("created_at", { ascending: false });
 
-      if (!profileData || profileData.role !== "admin") {
-        // Try to filter by client_email = user's email OR created_by = user.id
+      // FIXED: Only admin sees all projects
+      // Regular users ONLY see projects where client_email matches their email
+      if (profileData?.role === "admin") {
+        // Admin sees everything - no filter
+      } else {
+        // Regular user - only see projects assigned to their email
         if (currentUser?.email) {
-          query = query.or(`client_email.eq.${currentUser.email},created_by.eq.${currentUser.id}`);
+          query = query.eq("client_email", currentUser.email);
         } else {
-          query = query.eq("created_by", currentUser?.id || "");
+          // No email, show nothing
+          setProjects([]);
+          setLoading(false);
+          return;
         }
       }
 
       const { data, error } = await query;
+      
       if (error) {
         console.error("Error fetching properties:", error);
         pushToast("Failed to load projects.", "error");
+        setProjects([]);
       } else {
         setProjects(data || []);
       }
     } catch (err) {
       console.error("Fetch error:", err);
       pushToast("Failed to load projects.", "error");
+      setProjects([]);
     } finally {
       setLoading(false);
     }
   };
 
-  // Filtered projects in-memory (client side)
+  // Client-side filtering
   const filteredProjects = projects.filter((project) => {
     const term = searchTerm.trim().toLowerCase();
 
-    // Basic text filters
+    // Text search filter
     if (term) {
       switch (filterBy) {
         case "client_email":
-          if (!project.client_email) return false;
-          if (!project.client_email.toLowerCase().includes(term)) return false;
+          if (!project.client_email?.toLowerCase().includes(term)) return false;
+          break;
+        case "client_name":
+          if (!project.client_name?.toLowerCase().includes(term)) return false;
           break;
         case "site_address":
-          if (!project.site_address) return false;
-          if (!project.site_address.toLowerCase().includes(term)) return false;
+          if (!project.site_address?.toLowerCase().includes(term)) return false;
+          break;
+        case "city":
+          if (!project.city?.toLowerCase().includes(term)) return false;
           break;
         case "project_area":
-          if (project.project_area == null) return false;
-          if (!project.project_area.toString().includes(term)) return false;
+          if (!project.project_area?.toString().includes(term)) return false;
           break;
         default:
           break;
@@ -181,17 +182,24 @@ export default function ProjectsDashboard() {
     return true;
   });
 
-  // Delete project
+  // Delete project with confirmation - ADMIN ONLY
   const handleDelete = async (id) => {
-    if (!window.confirm("Are you sure you want to delete this project?")) return;
+    // CRITICAL: Check if user is admin
+    if (profile?.role !== "admin") {
+      pushToast("Only admins can delete projects.", "error");
+      return;
+    }
+
+    if (!window.confirm("Are you sure you want to delete this project? This action cannot be undone.")) return;
+    
     try {
       const { error } = await supabase.from("properties").delete().eq("id", id);
       if (error) {
-        console.error("❌ Delete failed:", error);
+        console.error("Delete failed:", error);
         pushToast("Failed to delete project.", "error");
       } else {
         setProjects((prev) => prev.filter((p) => p.id !== id));
-        pushToast("Project deleted.", "success");
+        pushToast("Project deleted successfully.", "success");
       }
     } catch (err) {
       console.error("Delete error:", err);
@@ -199,64 +207,87 @@ export default function ProjectsDashboard() {
     }
   };
 
-  // Logout improved
+  // Enhanced logout
   const handleLogout = async () => {
-    const ok = window.confirm("Do you want to logout?");
-    if (!ok) return;
+    const confirmed = window.confirm("Are you sure you want to logout?");
+    if (!confirmed) return;
+    
     try {
       const { error } = await supabase.auth.signOut();
       if (error) {
-        pushToast("Logout failed.", "error");
+        pushToast("Logout failed. Please try again.", "error");
       } else {
-        pushToast("Logged out.", "success");
-        navigate("/");
+        pushToast("Logged out successfully.", "success");
+        setTimeout(() => navigate("/"), 500);
       }
     } catch (err) {
       console.error("Logout error:", err);
-      pushToast("Logout failed.", "error");
+      pushToast("Logout failed. Please try again.", "error");
     }
   };
 
-  // Create project (drawer submit)
+  // Validate and create project - ADMIN ONLY
   const handleCreateProject = async (e) => {
     e?.preventDefault();
-    // Validate
+    
+    // CRITICAL: Check if user is admin
+    if (profile?.role !== "admin") {
+      pushToast("Only admins can create projects.", "error");
+      setDrawerOpen(false);
+      return;
+    }
+    
+    // Validation
     if (!newProject.client_name?.trim()) {
-      pushToast("Please enter client name.", "error");
+      pushToast("Client name is required.", "error");
       return;
     }
     if (!newProject.client_email?.trim()) {
-      pushToast("Please enter client email.", "error");
+      pushToast("Client email is required.", "error");
       return;
     }
+    
+    // Email validation
+    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+    if (!emailRegex.test(newProject.client_email)) {
+      pushToast("Please enter a valid email address.", "error");
+      return;
+    }
+    
     if (!newProject.site_address?.trim()) {
-      pushToast("Please enter site address.", "error");
+      pushToast("Site address is required.", "error");
       return;
     }
 
     const payload = {
-      ...newProject,
+      client_name: newProject.client_name.trim(),
+      client_email: newProject.client_email.trim().toLowerCase(),
+      site_address: newProject.site_address.trim(),
+      city: newProject.city?.trim() || null,
+      country: newProject.country?.trim() || null,
       project_area: newProject.project_area ? Number(newProject.project_area) : null,
       project_cost: newProject.project_cost ? Number(newProject.project_cost) : null,
+      currency: newProject.currency || "INR",
       created_by: user?.id ?? null,
       created_at: new Date().toISOString(),
     };
 
     try {
-      const { data, error } = await supabase.from("properties").insert([payload]).select().single();
+      const { data, error } = await supabase
+        .from("properties")
+        .insert([payload])
+        .select()
+        .single();
+        
       if (error) {
         console.error("Insert error:", error);
-        pushToast("Failed to create project.", "error");
+        pushToast("Failed to create project. Please try again.", "error");
       } else {
-        // refresh list — if admin, show all (re-fetch), otherwise add to state if allowed
-        if (profile?.role === "admin") {
-          await fetchProjects(user, profile);
-        } else {
-          setProjects((prev) => [data, ...prev]);
-        }
-        pushToast("Project created successfully.", "success");
+        await fetchProjects(user, profile);
+        pushToast("Project created successfully!", "success");
         setDrawerOpen(false);
-        // reset form
+        
+        // Reset form
         setNewProject({
           client_name: "",
           client_email: "",
@@ -270,306 +301,483 @@ export default function ProjectsDashboard() {
       }
     } catch (err) {
       console.error("Create project error:", err);
-      pushToast("Failed to create project.", "error");
+      pushToast("Failed to create project. Please try again.", "error");
     }
   };
 
-  // Simple helper to show date nicely
+  // Format date helper
   const formatDate = (d) => {
     try {
-      return new Date(d).toLocaleDateString();
+      return new Date(d).toLocaleDateString("en-US", {
+        year: "numeric",
+        month: "short",
+        day: "numeric",
+      });
     } catch {
       return "-";
     }
   };
 
+  // Handle unauthorized create attempt
+  const handleCreateClick = () => {
+    if (profile?.role !== "admin") {
+      pushToast("Only administrators can create new projects.", "error");
+      return;
+    }
+    setDrawerOpen(true);
+  };
+
   return (
-    <div className="min-h-screen bg-gray-50 p-6">
-      {/* Toasts */}
-      <div className="fixed right-6 top-6 z-50 flex flex-col gap-3">
+    <div className="min-h-screen bg-gradient-to-br from-gray-50 to-gray-100">
+      {/* Enhanced Toast Notifications */}
+      <div className="fixed right-6 top-6 z-50 flex flex-col gap-3 max-w-sm">
         {toasts.map((t) => (
           <div
             key={t.id}
-            className={`px-4 py-2 rounded shadow-md text-sm max-w-xs break-words ${
+            className={`px-5 py-3 rounded-xl shadow-lg text-sm font-medium transition-all transform animate-slide-in ${
               t.type === "success"
-                ? "bg-green-50 text-green-800 border border-green-100"
+                ? "bg-green-500 text-white"
                 : t.type === "error"
-                ? "bg-red-50 text-red-800 border border-red-100"
-                : "bg-white text-gray-800 border border-gray-200"
+                ? "bg-red-500 text-white"
+                : "bg-blue-500 text-white"
             }`}
           >
-            {t.message}
+            <div className="flex items-center gap-2">
+              {t.type === "success" && (
+                <svg className="w-5 h-5" fill="currentColor" viewBox="0 0 20 20">
+                  <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clipRule="evenodd"/>
+                </svg>
+              )}
+              {t.type === "error" && (
+                <svg className="w-5 h-5" fill="currentColor" viewBox="0 0 20 20">
+                  <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zM8.707 7.293a1 1 0 00-1.414 1.414L8.586 10l-1.293 1.293a1 1 0 101.414 1.414L10 11.414l1.293 1.293a1 1 0 001.414-1.414L11.414 10l1.293-1.293a1 1 0 00-1.414-1.414L10 8.586 8.707 7.293z" clipRule="evenodd"/>
+                </svg>
+              )}
+              <span>{t.message}</span>
+            </div>
           </div>
         ))}
       </div>
 
-      <div className="max-w-full">
-        {/* Header */}
-        <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center mb-6 gap-4">
-          <div>
-            <h1 className="text-2xl font-semibold text-gray-800">Projects</h1>
-            <p className="text-sm text-gray-500 mt-1">
-              {profile ? `Signed in as ${profile.name || profile.email} (${profile.role || "user"})` : "Loading..."}
-            </p>
-          </div>
+      <div className="max-w-7xl mx-auto p-6">
+        {/* Enhanced Header */}
+        <div className="bg-white rounded-2xl shadow-sm p-6 mb-6">
+          <div className="flex flex-col lg:flex-row justify-between items-start lg:items-center gap-4">
+            <div>
+              <h1 className="text-3xl font-bold text-gray-800 mb-2">Projects Dashboard</h1>
+              <div className="flex items-center gap-3">
+                <div className="flex items-center gap-2 text-sm">
+                  <div className={`w-2 h-2 rounded-full ${profile?.role === "admin" ? "bg-purple-500" : "bg-blue-500"}`}></div>
+                  <span className="text-gray-600">
+                    {profile?.name || profile?.email || "Loading..."}
+                  </span>
+                  <span className={`px-2.5 py-0.5 rounded-full text-xs font-semibold ${
+                    profile?.role === "admin" 
+                      ? "bg-purple-100 text-purple-700" 
+                      : "bg-blue-100 text-blue-700"
+                  }`}>
+                    {profile?.role === "admin" ? "Admin" : "User"}
+                  </span>
+                </div>
+              </div>
+            </div>
 
-          <div className="flex gap-3">
-            <button
-              onClick={() => setDrawerOpen(true)}
-              className="bg-orange-500 text-white px-4 py-2 rounded hover:bg-orange-600 flex items-center gap-2 font-medium"
-            >
-              <Plus size={16} />
-              New Project
-            </button>
+            <div className="flex gap-3">
+              {/* ONLY show "New Project" button to admins */}
+              {profile?.role === "admin" ? (
+                <button
+                  onClick={handleCreateClick}
+                  className="bg-gradient-to-r from-indigo-600 to-purple-600 text-white px-6 py-2.5 rounded-xl hover:from-indigo-700 hover:to-purple-700 flex items-center gap-2 font-medium shadow-lg hover:shadow-xl transition-all transform hover:scale-105"
+                >
+                  <Plus size={18} />
+                  New Project
+                </button>
+              ) : (
+                <div className="flex items-center gap-2 bg-blue-50 text-blue-700 px-4 py-2.5 rounded-xl border border-blue-200">
+                  <AlertCircle size={18} />
+                  <span className="text-sm font-medium">View Only Access</span>
+                </div>
+              )}
 
-            <button
-              onClick={handleLogout}
-              className="bg-white border border-gray-200 hover:bg-gray-50 px-4 py-2 rounded flex items-center gap-2 font-medium"
-            >
-              <LogOut size={16} />
-              Logout
-            </button>
-          </div>
-        </div>
-
-        {/* Filters row */}
-        <div className="mb-4 flex flex-col sm:flex-row sm:items-center gap-3">
-          <select
-            value={filterBy}
-            onChange={(e) => setFilterBy(e.target.value)}
-            className="border border-gray-300 rounded px-3 py-2 focus:outline-none focus:ring-2 focus:ring-orange-400"
-          >
-            <option value="client_email">Filter by Email</option>
-            <option value="site_address">Filter by Site Address</option>
-            <option value="project_area">Filter by Project Area</option>
-          </select>
-
-          <div className="relative flex-1 max-w-md">
-            <Search size={18} className="absolute left-3 top-3 text-gray-400" />
-            <input
-              type="text"
-              placeholder={`Search by ${filterBy.replace("_", " ")}`}
-              value={searchTerm}
-              onChange={(e) => setSearchTerm(e.target.value)}
-              className="w-full pl-10 pr-4 py-2 border border-gray-300 rounded focus:outline-none focus:ring-2 focus:ring-orange-400"
-            />
-          </div>
-
-          {/* Advanced area filters */}
-          <div className="flex items-center gap-2">
-            <label className="text-sm text-gray-600">Area:</label>
-            <select
-              value={areaOperator}
-              onChange={(e) => setAreaOperator(e.target.value)}
-              className="border border-gray-300 rounded px-2 py-1 focus:outline-none"
-            >
-              <option value="lt">&lt;</option>
-              <option value="eq">=</option>
-              <option value="gt">&gt;</option>
-            </select>
-            <input
-              type="number"
-              value={areaValue}
-              onChange={(e) => setAreaValue(e.target.value)}
-              className="w-24 px-2 py-1 border border-gray-300 rounded focus:outline-none"
-              placeholder="sqft"
-            />
-            <button
-              onClick={() => {
-                // clear area filter
-                setAreaValue("");
-                setAreaOperator("eq");
-              }}
-              className="text-sm text-gray-500 hover:text-gray-800"
-            >
-              Clear
-            </button>
+              <button
+                onClick={handleLogout}
+                className="bg-white border-2 border-gray-200 hover:border-gray-300 hover:bg-gray-50 px-6 py-2.5 rounded-xl flex items-center gap-2 font-medium transition-all"
+              >
+                <LogOut size={18} />
+                Logout
+              </button>
+            </div>
           </div>
         </div>
 
-        {/* Table */}
-        <div className="bg-white rounded-lg shadow-sm overflow-x-auto">
-          <table className="w-full text-sm">
-            <thead>
-              <tr className="border-b bg-gray-50">
-                <th className="px-6 py-3 text-left font-semibold text-gray-700">Client</th>
-                <th className="px-6 py-3 text-left font-semibold text-gray-700">Email</th>
-                <th className="px-6 py-3 text-left font-semibold text-gray-700">Site Address</th>
-                <th className="px-6 py-3 text-left font-semibold text-gray-700">City</th>
-                <th className="px-6 py-3 text-left font-semibold text-gray-700">Area</th>
-                <th className="px-6 py-3 text-left font-semibold text-gray-700">Cost</th>
-                <th className="px-6 py-3 text-left font-semibold text-gray-700">Created</th>
-                <th className="px-6 py-3 text-center font-semibold text-gray-700">Action</th>
-              </tr>
-            </thead>
-            <tbody>
-              {filteredProjects.length > 0 ? (
-                filteredProjects.slice(0, itemsPerPage).map((p) => (
-                  <tr key={p.id} className="border-b hover:bg-gray-50">
-                    <td className="px-6 py-4 text-gray-900">{p.client_name || "-"}</td>
-                    <td className="px-6 py-4 text-gray-600">{p.client_email || "-"}</td>
-                    <td className="px-6 py-4 text-gray-600">{p.site_address || "-"}</td>
-                    <td className="px-6 py-4 text-gray-600">{p.city || "-"}</td>
-                    <td className="px-6 py-4 text-gray-600">{p.project_area ?? "-"}</td>
-                    <td className="px-6 py-4 text-gray-600">
-                      {p.project_cost ? `${p.project_cost} ${p.currency || ""}` : "-"}
-                    </td>
-                    <td className="px-6 py-4 text-gray-600">{formatDate(p.created_at)}</td>
-                    <td className="px-6 py-4 text-center">
-                      <div className="flex items-center justify-center gap-2">
-                        <button
-                          onClick={() => handleDelete(p.id)}
-                          className="text-red-500 hover:text-red-700 inline-flex items-center gap-2"
-                          title="Delete project"
-                        >
-                          <Trash2 size={16} />
-                        </button>
+        {/* Enhanced Filters */}
+        <div className="bg-white rounded-2xl shadow-sm p-6 mb-6">
+          <div className="flex items-center gap-2 mb-4">
+            <Filter size={20} className="text-gray-600" />
+            <h2 className="text-lg font-semibold text-gray-800">Filters</h2>
+          </div>
+          
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
+            {/* Filter Type Selector */}
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-2">Search By</label>
+              <select
+                value={filterBy}
+                onChange={(e) => setFilterBy(e.target.value)}
+                className="w-full border-2 border-gray-200 rounded-xl px-4 py-2.5 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent transition-all"
+              >
+                <option value="client_email">Client Email</option>
+                <option value="client_name">Client Name</option>
+                <option value="site_address">Site Address</option>
+                <option value="city">City</option>
+                <option value="project_area">Project Area</option>
+              </select>
+            </div>
+
+            {/* Search Input */}
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-2">Search Term</label>
+              <div className="relative">
+                <Search size={18} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
+                <input
+                  type="text"
+                  placeholder={`Search by ${filterBy.replace("_", " ")}`}
+                  value={searchTerm}
+                  onChange={(e) => setSearchTerm(e.target.value)}
+                  className="w-full pl-10 pr-4 py-2.5 border-2 border-gray-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent transition-all"
+                />
+              </div>
+            </div>
+
+            {/* Area Filter Operator */}
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-2">Area Condition</label>
+              <select
+                value={areaOperator}
+                onChange={(e) => setAreaOperator(e.target.value)}
+                className="w-full border-2 border-gray-200 rounded-xl px-4 py-2.5 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent transition-all"
+              >
+                <option value="lt">Less Than (&lt;)</option>
+                <option value="eq">Equal To (=)</option>
+                <option value="gt">Greater Than (&gt;)</option>
+              </select>
+            </div>
+
+            {/* Area Value */}
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-2">Area Value (sqft)</label>
+              <div className="flex gap-2">
+                <input
+                  type="number"
+                  value={areaValue}
+                  onChange={(e) => setAreaValue(e.target.value)}
+                  placeholder="e.g. 1500"
+                  className="flex-1 px-4 py-2.5 border-2 border-gray-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent transition-all"
+                />
+                {areaValue && (
+                  <button
+                    onClick={() => setAreaValue("")}
+                    className="px-4 py-2.5 bg-gray-100 hover:bg-gray-200 rounded-xl text-gray-600 font-medium transition-all"
+                  >
+                    Clear
+                  </button>
+                )}
+              </div>
+            </div>
+          </div>
+
+          {/* Clear All Filters */}
+          {(searchTerm || areaValue) && (
+            <div className="mt-4 flex justify-end">
+              <button
+                onClick={() => {
+                  setSearchTerm("");
+                  setAreaValue("");
+                  setAreaOperator("eq");
+                }}
+                className="text-sm text-indigo-600 hover:text-indigo-700 font-medium"
+              >
+                Clear all filters
+              </button>
+            </div>
+          )}
+        </div>
+
+        {/* Enhanced Table */}
+        <div className="bg-white rounded-2xl shadow-sm overflow-hidden">
+          <div className="overflow-x-auto">
+            <table className="w-full">
+              <thead>
+                <tr className="bg-gradient-to-r from-gray-50 to-gray-100 border-b-2 border-gray-200">
+                  <th className="px-6 py-4 text-left text-sm font-semibold text-gray-700">Client</th>
+                  <th className="px-6 py-4 text-left text-sm font-semibold text-gray-700">Email</th>
+                  <th className="px-6 py-4 text-left text-sm font-semibold text-gray-700">Site Address</th>
+                  <th className="px-6 py-4 text-left text-sm font-semibold text-gray-700">City</th>
+                  <th className="px-6 py-4 text-left text-sm font-semibold text-gray-700">Area (sqft)</th>
+                  <th className="px-6 py-4 text-left text-sm font-semibold text-gray-700">Cost</th>
+                  <th className="px-6 py-4 text-left text-sm font-semibold text-gray-700">Created</th>
+                  {/* ONLY show Actions column to admins */}
+                  {profile?.role === "admin" && (
+                    <th className="px-6 py-4 text-center text-sm font-semibold text-gray-700">Actions</th>
+                  )}
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-gray-100">
+                {loading ? (
+                  <tr>
+                    <td colSpan={profile?.role === "admin" ? "8" : "7"} className="px-6 py-12 text-center">
+                      <div className="flex flex-col items-center gap-3">
+                        <div className="w-8 h-8 border-4 border-indigo-600 border-t-transparent rounded-full animate-spin"></div>
+                        <span className="text-gray-500 font-medium">Loading projects...</span>
                       </div>
                     </td>
                   </tr>
-                ))
-              ) : (
-                <tr>
-                  <td colSpan="8" className="px-6 py-8 text-center text-gray-500">
-                    {loading ? "Loading projects..." : "No projects found"}
-                  </td>
-                </tr>
-              )}
-            </tbody>
-          </table>
-        </div>
-
-        {/* Footer */}
-        <div className="flex flex-col sm:flex-row justify-between items-center mt-4 text-sm text-gray-600 gap-3">
-          <span>
-            Showing {Math.min(filteredProjects.length, itemsPerPage)} of {filteredProjects.length} entries
-          </span>
-          <div className="flex items-center gap-2">
-            <span>Items per page</span>
-            <select
-              value={itemsPerPage}
-              onChange={(e) => setItemsPerPage(Number(e.target.value))}
-              className="border border-gray-300 rounded px-2 py-1 focus:outline-none focus:ring-2 focus:ring-orange-400"
-            >
-              <option value={10}>10</option>
-              <option value={25}>25</option>
-              <option value={50}>50</option>
-            </select>
+                ) : filteredProjects.length > 0 ? (
+                  filteredProjects.slice(0, itemsPerPage).map((p) => (
+                    <tr key={p.id} className="hover:bg-gray-50 transition-colors">
+                      <td className="px-6 py-4">
+                        <div className="flex items-center gap-2">
+                          <div className="w-8 h-8 rounded-full bg-gradient-to-br from-indigo-500 to-purple-500 flex items-center justify-center text-white font-semibold text-sm">
+                            {p.client_name?.charAt(0).toUpperCase() || "?"}
+                          </div>
+                          <span className="font-medium text-gray-900">{p.client_name || "-"}</span>
+                        </div>
+                      </td>
+                      <td className="px-6 py-4">
+                        <div className="flex items-center gap-2 text-gray-600">
+                          <Mail size={16} className="text-gray-400" />
+                          <span className="text-sm">{p.client_email || "-"}</span>
+                        </div>
+                      </td>
+                      <td className="px-6 py-4">
+                        <div className="flex items-center gap-2 text-gray-600">
+                          <MapPin size={16} className="text-gray-400" />
+                          <span className="text-sm">{p.site_address || "-"}</span>
+                        </div>
+                      </td>
+                      <td className="px-6 py-4">
+                        <span className="text-sm text-gray-600">{p.city || "-"}</span>
+                      </td>
+                      <td className="px-6 py-4">
+                        <span className="inline-flex items-center px-2.5 py-1 rounded-lg bg-blue-50 text-blue-700 text-sm font-medium">
+                          {p.project_area ? `${p.project_area} sqft` : "-"}
+                        </span>
+                      </td>
+                      <td className="px-6 py-4">
+                        <span className="text-sm font-medium text-gray-900">
+                          {p.project_cost ? `${p.currency || ""} ${Number(p.project_cost).toLocaleString()}` : "-"}
+                        </span>
+                      </td>
+                      <td className="px-6 py-4">
+                        <span className="text-sm text-gray-500">{formatDate(p.created_at)}</span>
+                      </td>
+                      {/* ONLY show delete button to admins */}
+                      {profile?.role === "admin" && (
+                        <td className="px-6 py-4">
+                          <div className="flex items-center justify-center gap-2">
+                            <button
+                              onClick={() => handleDelete(p.id)}
+                              className="p-2 text-red-500 hover:bg-red-50 rounded-lg transition-all"
+                              title="Delete project"
+                            >
+                              <Trash2 size={18} />
+                            </button>
+                          </div>
+                        </td>
+                      )}
+                    </tr>
+                  ))
+                ) : (
+                  <tr>
+                    <td colSpan={profile?.role === "admin" ? "8" : "7"} className="px-6 py-12 text-center">
+                      <div className="flex flex-col items-center gap-3">
+                        <Building2 size={48} className="text-gray-300" />
+                        <div>
+                          <p className="text-gray-600 font-medium mb-1">No projects found</p>
+                          <p className="text-sm text-gray-500">
+                            {profile?.role === "admin" 
+                              ? "Create a new project to get started" 
+                              : "No projects assigned to your email"}
+                          </p>
+                        </div>
+                      </div>
+                    </td>
+                  </tr>
+                )}
+              </tbody>
+            </table>
           </div>
+
+          {/* Enhanced Footer */}
+          {filteredProjects.length > 0 && (
+            <div className="border-t border-gray-200 bg-gray-50 px-6 py-4">
+              <div className="flex flex-col sm:flex-row justify-between items-center gap-4">
+                <span className="text-sm text-gray-600">
+                  Showing <span className="font-semibold">{Math.min(filteredProjects.length, itemsPerPage)}</span> of{" "}
+                  <span className="font-semibold">{filteredProjects.length}</span> projects
+                </span>
+                <div className="flex items-center gap-3">
+                  <span className="text-sm text-gray-600">Rows per page</span>
+                  <select
+                    value={itemsPerPage}
+                    onChange={(e) => setItemsPerPage(Number(e.target.value))}
+                    className="border-2 border-gray-200 rounded-lg px-3 py-1.5 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent"
+                  >
+                    <option value={10}>10</option>
+                    <option value={25}>25</option>
+                    <option value={50}>50</option>
+                    <option value={100}>100</option>
+                  </select>
+                </div>
+              </div>
+            </div>
+          )}
         </div>
       </div>
 
-      {/* Drawer for creating new project */}
-      {drawerOpen && (
-        <div className="fixed inset-0 z-40 flex">
-          {/* overlay */}
+      {/* Enhanced Drawer for Creating Project - ADMIN ONLY */}
+      {drawerOpen && profile?.role === "admin" && (
+        <div className="fixed inset-0 z-50 flex">
+          {/* Backdrop */}
           <div
-            className="absolute inset-0 bg-black/30"
+            className="absolute inset-0 bg-black/50 backdrop-blur-sm transition-opacity"
             onClick={() => setDrawerOpen(false)}
           />
 
-          <div className="ml-auto w-full max-w-md bg-white h-full shadow-2xl p-6 relative overflow-auto">
-            <button
-              onClick={() => setDrawerOpen(false)}
-              className="absolute right-4 top-4 text-gray-600 hover:text-gray-800"
-              title="Close"
-            >
-              <X />
-            </button>
+          {/* Drawer */}
+          <div className="ml-auto w-full max-w-lg bg-white h-full shadow-2xl relative overflow-auto animate-slide-left">
+            <div className="sticky top-0 bg-white border-b border-gray-200 px-6 py-4 z-10">
+              <div className="flex items-center justify-between">
+                <div>
+                  <h2 className="text-2xl font-bold text-gray-800">Create New Project</h2>
+                  <p className="text-sm text-gray-500 mt-1">Fill in the project details below</p>
+                </div>
+                <button
+                  onClick={() => setDrawerOpen(false)}
+                  className="p-2 hover:bg-gray-100 rounded-lg transition-all"
+                  title="Close"
+                >
+                  <X size={24} />
+                </button>
+              </div>
+            </div>
 
-            <h2 className="text-xl font-semibold mb-4">Create New Project</h2>
-            <form onSubmit={handleCreateProject} className="space-y-3">
+            <form onSubmit={handleCreateProject} className="p-6 space-y-5">
+              {/* Client Name */}
               <div>
-                <label className="text-sm text-gray-600">Client Name</label>
+                <label className="block text-sm font-semibold text-gray-700 mb-2">
+                  Client Name <span className="text-red-500">*</span>
+                </label>
                 <input
                   value={newProject.client_name}
                   onChange={(e) => setNewProject({ ...newProject, client_name: e.target.value })}
-                  className="w-full px-3 py-2 border border-gray-300 rounded mt-1"
-                  placeholder="Full name"
+                  className="w-full px-4 py-3 border-2 border-gray-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent transition-all"
+                  placeholder="Full name of the client"
                 />
               </div>
 
+              {/* Client Email */}
               <div>
-                <label className="text-sm text-gray-600">Client Email</label>
+                <label className="block text-sm font-semibold text-gray-700 mb-2">
+                  Client Email <span className="text-red-500">*</span>
+                </label>
                 <input
+                  type="email"
                   value={newProject.client_email}
                   onChange={(e) => setNewProject({ ...newProject, client_email: e.target.value })}
-                  className="w-full px-3 py-2 border border-gray-300 rounded mt-1"
-                  placeholder="email@example.com"
+                  className="w-full px-4 py-3 border-2 border-gray-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent transition-all"
+                  placeholder="client@example.com"
                 />
+                <p className="text-xs text-gray-500 mt-1">User with this email will be able to view this project</p>
               </div>
 
+              {/* Site Address */}
               <div>
-                <label className="text-sm text-gray-600">Site Address</label>
-                <input
+                <label className="block text-sm font-semibold text-gray-700 mb-2">
+                  Site Address <span className="text-red-500">*</span>
+                </label>
+                <textarea
                   value={newProject.site_address}
                   onChange={(e) => setNewProject({ ...newProject, site_address: e.target.value })}
-                  className="w-full px-3 py-2 border border-gray-300 rounded mt-1"
-                  placeholder="Street, locality..."
+                  className="w-full px-4 py-3 border-2 border-gray-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent transition-all resize-none"
+                  placeholder="Complete site address"
+                  rows="3"
                 />
               </div>
 
-              <div className="grid grid-cols-2 gap-2">
+              {/* City and Country */}
+              <div className="grid grid-cols-2 gap-4">
                 <div>
-                  <label className="text-sm text-gray-600">City</label>
+                  <label className="block text-sm font-semibold text-gray-700 mb-2">City</label>
                   <input
                     value={newProject.city}
                     onChange={(e) => setNewProject({ ...newProject, city: e.target.value })}
-                    className="w-full px-3 py-2 border border-gray-300 rounded mt-1"
+                    className="w-full px-4 py-3 border-2 border-gray-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent transition-all"
+                    placeholder="e.g. Mumbai"
                   />
                 </div>
                 <div>
-                  <label className="text-sm text-gray-600">Country</label>
+                  <label className="block text-sm font-semibold text-gray-700 mb-2">Country</label>
                   <input
                     value={newProject.country}
                     onChange={(e) => setNewProject({ ...newProject, country: e.target.value })}
-                    className="w-full px-3 py-2 border border-gray-300 rounded mt-1"
+                    className="w-full px-4 py-3 border-2 border-gray-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent transition-all"
+                    placeholder="e.g. India"
                   />
                 </div>
               </div>
 
-              <div className="grid grid-cols-3 gap-2">
+              {/* Project Area, Cost, Currency */}
+              <div className="grid grid-cols-3 gap-4">
                 <div>
-                  <label className="text-sm text-gray-600">Project Area</label>
+                  <label className="block text-sm font-semibold text-gray-700 mb-2">Area (sqft)</label>
                   <input
                     type="number"
                     value={newProject.project_area}
                     onChange={(e) => setNewProject({ ...newProject, project_area: e.target.value })}
-                    className="w-full px-3 py-2 border border-gray-300 rounded mt-1"
-                    placeholder="e.g. 1200"
+                    className="w-full px-4 py-3 border-2 border-gray-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent transition-all"
+                    placeholder="1200"
                   />
                 </div>
                 <div>
-                  <label className="text-sm text-gray-600">Project Cost</label>
+                  <label className="block text-sm font-semibold text-gray-700 mb-2">Project Cost</label>
                   <input
                     type="number"
                     value={newProject.project_cost}
                     onChange={(e) => setNewProject({ ...newProject, project_cost: e.target.value })}
-                    className="w-full px-3 py-2 border border-gray-300 rounded mt-1"
-                    placeholder="numeric"
+                    className="w-full px-4 py-3 border-2 border-gray-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent transition-all"
+                    placeholder="500000"
                   />
                 </div>
                 <div>
-                  <label className="text-sm text-gray-600">Currency</label>
-                  <input
+                  <label className="block text-sm font-semibold text-gray-700 mb-2">Currency</label>
+                  <select
                     value={newProject.currency}
                     onChange={(e) => setNewProject({ ...newProject, currency: e.target.value })}
-                    className="w-full px-3 py-2 border border-gray-300 rounded mt-1"
-                    placeholder="INR"
-                  />
+                    className="w-full px-4 py-3 border-2 border-gray-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent transition-all"
+                  >
+                    <option value="INR">INR</option>
+                    <option value="USD">USD</option>
+                    <option value="EUR">EUR</option>
+                    <option value="GBP">GBP</option>
+                  </select>
                 </div>
               </div>
 
-              <div className="flex justify-end gap-2 mt-4">
+              {/* Action Buttons */}
+              <div className="flex justify-end gap-3 pt-4 border-t border-gray-200">
                 <button
                   type="button"
                   onClick={() => setDrawerOpen(false)}
-                  className="px-4 py-2 border rounded"
+                  className="px-6 py-2.5 border-2 border-gray-200 rounded-xl hover:bg-gray-50 font-medium transition-all"
                 >
                   Cancel
                 </button>
-                <button type="submit" className="px-4 py-2 bg-orange-500 text-white rounded hover:bg-orange-600">
-                  Create
+                <button
+                  type="submit"
+                  className="px-6 py-2.5 bg-gradient-to-r from-indigo-600 to-purple-600 text-white rounded-xl hover:from-indigo-700 hover:to-purple-700 font-medium shadow-lg hover:shadow-xl transition-all transform hover:scale-105"
+                >
+                  Create Project
                 </button>
               </div>
             </form>

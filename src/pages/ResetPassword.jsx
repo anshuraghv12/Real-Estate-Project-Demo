@@ -49,3 +49,24 @@ export default function ResetPassword() {
     </div>
   );
 }
+import { toast } from "react-hot-toast";
+
+const handleReset = async () => {
+  const accessToken = searchParams.get("access_token");
+  if (!accessToken) {
+    toast.error("Invalid reset link.");
+    return;
+  }
+
+  setLoading(true);
+  try {
+    const { error } = await supabase.auth.updateUser({ password: newPassword }, accessToken);
+    if (error) throw error;
+    toast.success("Password updated successfully!");
+    setTimeout(() => navigate("/login"), 2000);
+  } catch (error) {
+    toast.error(error?.message || "Failed to reset password.");
+  } finally {
+    setLoading(false);
+  }
+};
