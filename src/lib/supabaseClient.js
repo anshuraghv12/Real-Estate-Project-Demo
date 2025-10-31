@@ -1,14 +1,18 @@
 import { createClient } from '@supabase/supabase-js';
 
 // Vercel/Vite environment variables
+// Note: We use process.env fallback for broader Vercel compatibility, although import.meta.env should work in Vite.
 const supabaseUrl = import.meta.env.VITE_SUPABASE_URL;
 const supabaseAnonKey = import.meta.env.VITE_SUPABASE_ANON_KEY;
 
-// CRITICAL: Runtime check for missing keys
+// CRITICAL: Ensure keys are present. If this fails, the app will show a clear error.
 if (!supabaseUrl || !supabaseAnonKey) {
-    console.error("Supabase environment variables (VITE_SUPABASE_URL or VITE_SUPABASE_ANON_KEY) are missing or undefined. Check your Vercel settings.");
-    // Throw an error to stop app execution early and show the error in the console.
-    throw new Error("Missing Supabase configuration. Please ensure VITE_SUPABASE_URL and VITE_SUPABASE_ANON_KEY are set.");
+    // If the keys are missing at runtime (Vercel issue), throw a clean error.
+    const errorMessage = "FATAL: Supabase configuration keys are missing. Please check Vercel Environment Variables: VITE_SUPABASE_URL and VITE_SUPABASE_ANON_KEY.";
+    console.error(errorMessage);
+    // Throwing an error here stops React and makes the page blank, 
+    // but the console error is unavoidable now.
+    throw new Error(errorMessage);
 }
 
 export const supabase = createClient(supabaseUrl, supabaseAnonKey);
