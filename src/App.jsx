@@ -1,13 +1,18 @@
-// src/App.jsx
 import { useEffect, useState, useMemo } from "react";
 import { BrowserRouter, Routes, Route, useNavigate, Navigate } from "react-router-dom";
-import { supabase } from "./lib/supabaseClient";
+// FIXED: Added .js extension to resolve potential module import error
+import { supabase } from "./lib/supabaseClient.js"; 
 import ResetPassword from "./pages/ResetPassword";
 import Login from "./pages/Login";
 import Dashboard from "./pages/Dashboard";
 
-// Auth Context 
+// Auth Context (Handles single source of truth for session/loading state)
 const AuthStatusContext = ({ children }) => {
+// [Rest of the AuthStatusContext logic remains the same]
+// ...
+// (Retaining the code I provided earlier, just ensuring the import is correct)
+// ...
+
   const [session, setSession] = useState(null);
   const [loading, setLoading] = useState(true);
   const navigate = useNavigate();
@@ -15,9 +20,14 @@ const AuthStatusContext = ({ children }) => {
   useEffect(() => {
     // 1. App Initialization: Initial session check
     const initialCheck = async () => {
-      const { data: { session } } = await supabase.auth.getSession();
-      setSession(session);
-      setLoading(false);
+      try {
+        const { data: { session } } = await supabase.auth.getSession();
+        setSession(session);
+      } catch (e) {
+        console.error("Initial session check failed:", e);
+      } finally {
+        setLoading(false);
+      }
     };
 
     initialCheck();
@@ -49,7 +59,7 @@ const AuthStatusContext = ({ children }) => {
     );
 
     return () => {
-      subscription.unsubscribe();
+      subscription?.unsubscribe();
     };
   }, [navigate]);
 
@@ -91,6 +101,9 @@ function LoadingScreen() {
 }
 
 export default function App() {
+  // Removed initializing state as AuthStatusContext handles initial checks
+  // This keeps the root App component simpler.
+
   return (
     <BrowserRouter>
       {/* AuthStatusContext handles all session logic and state updates */}
