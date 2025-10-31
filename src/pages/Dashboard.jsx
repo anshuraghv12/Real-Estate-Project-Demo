@@ -1,6 +1,5 @@
 import React, { useEffect, useState } from "react";
 import { Search, Plus, Trash2, LogOut, X, Filter, Building2, Mail, MapPin, AlertCircle, Loader2 } from "lucide-react";
-// FIXED: Added .js extension to resolve module import error
 import { supabase, logoutUser } from "../lib/supabaseClient.js"; 
 import { useNavigate } from "react-router-dom";
 
@@ -89,18 +88,29 @@ export default function ProjectsDashboard() {
         const init = async () => {
             try {
                 setLoading(true);
-                const { data: sessionData } = await supabase.auth.getSession();
-                const session = sessionData?.session ?? null;
-                const currentUser = session?.user ?? null;
-
-                if (!mounted) return;
-
-                // Auth Guard (handled better by App.jsx, but good secondary check)
-                if (!currentUser) {
+                
+                // Get current session
+                const { data: sessionData, error: sessionError } = await supabase.auth.getSession();
+                
+                if (sessionError) {
+                    console.error("Session error:", sessionError);
                     navigate("/", { replace: true });
                     return;
                 }
 
+                const session = sessionData?.session;
+                const currentUser = session?.user;
+
+                if (!mounted) return;
+
+                // Auth Guard
+                if (!currentUser) {
+                    console.log("No user found, redirecting to login");
+                    navigate("/", { replace: true });
+                    return;
+                }
+
+                console.log("Current user:", currentUser.email);
                 setUser(currentUser);
 
                 // Fetch profile to check role
@@ -110,13 +120,24 @@ export default function ProjectsDashboard() {
                     .eq("id", currentUser.id)
                     .single();
 
-                if (!profileErr && profileData) {
-                    setProfile(profileData);
-                    // Fetch projects after profile is confirmed
-                    await fetchProjects(currentUser, profileData);
-                } else {
+                if (profileErr) {
+                    console.error("Profile fetch error:", profileErr);
                     pushToast("Profile not found. Please contact support.", "error");
+                    return;
                 }
+
+                if (!profileData) {
+                    console.error("No profile data found");
+                    pushToast("Profile not found. Please contact support.", "error");
+                    return;
+                }
+
+                console.log("Profile loaded:", profileData.email, "Role:", profileData.role);
+                setProfile(profileData);
+                
+                // Fetch projects after profile is confirmed
+                await fetchProjects(currentUser, profileData);
+                
             } catch (err) {
                 console.error("Init error:", err);
                 pushToast("Failed to initialize dashboard.", "error");
@@ -132,43 +153,55 @@ export default function ProjectsDashboard() {
         };
     }, [navigate]);
 
-    // Fetch projects based on user role - FIXED ACCESS CONTROL
+    // IMPROVED: Fetch projects with better error handling and logging
     const fetchProjects = async (currentUser = user, profileData = profile) => {
-        if (!currentUser || !profileData) return;
+        if (!currentUser || !profileData) {
+            console.log("Missing user or profile data");
+            return;
+        }
 
         try {
-            // Note: We don't set global loading here to allow separate component loading states
+            console.log("Fetching projects for:", profileData.email, "Role:", profileData.role);
             
             let query = supabase
                 .from("properties")
-                .select(
-                    "id, client_name, client_email, site_address, country, city, project_area, project_cost, currency, created_at, created_by"
-                )
+                .select("*")
                 .order("created_at", { ascending: false });
 
-            // RLS check logic (mirrors recommended Supabase RLS policies)
-            if (profileData?.role === "admin") {
-                // Admin sees everything - no filter
+            // Apply RLS-compatible filters
+            if (profileData?.role !== "admin") {
+                // Regular user - filter by their profile email (not auth email)
+                console.log("User role - filtering by profile email:", profileData.email);
+                query = query.eq("client_email", profileData.email);
             } else {
-                // Regular user - only see projects assigned to their email
-                if (currentUser?.email) {
-                    query = query.eq("client_email", currentUser.email);
-                } else {
-                    // No email, show nothing
-                    setProjects([]);
-                    return;
-                }
+                console.log("Admin role - fetching all properties");
             }
 
             const { data, error } = await query;
             
             if (error) {
                 console.error("Error fetching properties:", error);
-                pushToast("Failed to load projects.", "error");
+                pushToast(`Failed to load projects: ${error.message}`, "error");
                 setProjects([]);
-            } else {
-                setProjects(data || []);
+                return;
             }
+
+            console.log("Properties fetched:", data?.length || 0, "records");
+            
+            if (data && data.length > 0) {
+                console.log("Sample property:", data[0]);
+            }
+            
+            setProjects(data || []);
+            
+            if (!data || data.length === 0) {
+                if (profileData.role === "admin") {
+                    pushToast("No properties found in database", "info");
+                } else {
+                    pushToast(`No properties assigned to ${profileData.email}`, "info");
+                }
+            }
+            
         } catch (err) {
             console.error("Fetch error:", err);
             pushToast("Failed to load projects.", "error");
@@ -176,7 +209,7 @@ export default function ProjectsDashboard() {
         }
     };
 
-    // Client-side filtering logic remains the same (good implementation)
+    // Client-side filtering logic
     const filteredProjects = projects.filter((project) => {
         const term = searchTerm.trim().toLowerCase();
 
@@ -196,7 +229,6 @@ export default function ProjectsDashboard() {
                     if (!project.city?.toLowerCase().includes(term)) return false;
                     break;
                 case "project_area":
-                    // Check if numeric conversion works before filtering
                     const areaString = project.project_area?.toString() || '';
                     if (!areaString.includes(term)) return false;
                     break;
@@ -205,7 +237,7 @@ export default function ProjectsDashboard() {
             }
         }
 
-        // Area numeric filter - CLIENT REQUIREMENT: Less than, Equal to, Greater than
+        // Area numeric filter
         if (areaValue !== "") {
             const num = Number(areaValue);
             const area = Number(project.project_area || 0);
@@ -219,7 +251,7 @@ export default function ProjectsDashboard() {
         return true;
     });
 
-    // Delete confirmation handler (Replaced window.confirm)
+    // Delete confirmation handler
     const handleConfirmDelete = (id) => {
         if (profile?.role !== "admin") {
             pushToast("Only admins can delete projects.", "error");
@@ -259,7 +291,7 @@ export default function ProjectsDashboard() {
         }
     };
 
-    // Enhanced logout (Uses logoutUser utility)
+    // Enhanced logout
     const handleLogout = () => {
         setModalConfig({
             isOpen: true,
@@ -268,14 +300,12 @@ export default function ProjectsDashboard() {
             onConfirm: async () => {
                 setModalConfig({ isOpen: false, title: '', message: '', onConfirm: () => {} });
                 try {
-                    // Use the centralized utility function
                     const { success, message: errorMessage } = await logoutUser(); 
 
                     if (!success) {
                         pushToast(errorMessage || "Logout failed. Please try again.", "error");
                     } else {
                         pushToast("Logged out successfully. Redirecting...", "success");
-                        // App.jsx listener will handle final navigation to "/"
                     }
                 } catch (err) {
                     console.error("Logout error:", err);
@@ -286,13 +316,11 @@ export default function ProjectsDashboard() {
         });
     };
 
-
     // Validate and create project - ADMIN ONLY
     const handleCreateProject = async (e) => {
         e?.preventDefault();
         setCreateLoading(true);
         
-        // CRITICAL: Check if user is admin
         if (profile?.role !== "admin") {
             pushToast("Only admins can create projects.", "error");
             setCreateLoading(false);
@@ -339,6 +367,8 @@ export default function ProjectsDashboard() {
             created_at: new Date().toISOString(),
         };
 
+        console.log("Creating project with payload:", payload);
+
         try {
             const { data, error } = await supabase
                 .from("properties")
@@ -350,9 +380,9 @@ export default function ProjectsDashboard() {
                 console.error("Insert error:", error);
                 pushToast(`Failed to create project: ${error.message}`, "error");
             } else {
-                // Fetch updated list to include the new project immediately
+                console.log("Project created:", data);
                 await fetchProjects(user, profile); 
-                pushToast("Project created successfully!", "success"); // CLIENT REQUIREMENT: Toast on creation
+                pushToast("Project created successfully!", "success");
                 setDrawerOpen(false);
                 
                 // Reset form
@@ -481,7 +511,6 @@ export default function ProjectsDashboard() {
                         </div>
 
                         <div className="flex gap-3">
-                            {/* ONLY show "New Project" button to admins */}
                             {profile?.role === "admin" ? (
                                 <button
                                     onClick={handleCreateClick}
@@ -531,7 +560,7 @@ export default function ProjectsDashboard() {
                             <label className="block text-sm font-medium text-gray-700 mb-2">Search By</label>
                             <select
                                 value={filterBy}
-                                onChange={(e) => setSearchTerm("") || setFilterBy(e.target.value)} // Clear search term on category change
+                                onChange={(e) => setSearchTerm("") || setFilterBy(e.target.value)}
                                 className="w-full border-2 border-gray-200 rounded-xl px-4 py-2.5 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent transition-all"
                             >
                                 <option value="client_email">Client Email</option>
@@ -565,7 +594,6 @@ export default function ProjectsDashboard() {
                                 onChange={(e) => setAreaOperator(e.target.value)}
                                 className="w-full border-2 border-gray-200 rounded-xl px-4 py-2.5 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent transition-all"
                             >
-                                {/* Using HTML entities for < and > */}
                                 <option value="lt">Less Than (&lt;)</option>
                                 <option value="eq">Equal To (=)</option>
                                 <option value="gt">Greater Than (&gt;)</option>
@@ -625,7 +653,6 @@ export default function ProjectsDashboard() {
                                     <th className="px-6 py-4 text-left text-sm font-semibold text-gray-700">Area (sqft)</th>
                                     <th className="px-6 py-4 text-left text-sm font-semibold text-gray-700">Cost</th>
                                     <th className="px-6 py-4 text-left text-sm font-semibold text-gray-700">Created</th>
-                                    {/* ONLY show Actions column to admins */}
                                     {profile?.role === "admin" && (
                                         <th className="px-6 py-4 text-center text-sm font-semibold text-gray-700">Actions</th>
                                     )}
@@ -645,29 +672,6 @@ export default function ProjectsDashboard() {
                                     filteredProjects.slice(0, itemsPerPage).map((p) => (
                                         <tr key={p.id} className="hover:bg-gray-50 transition-colors">
                                             <td className="px-6 py-4">
-                                                <div className="flex items-center gap-2">
-                                                    <div className="w-8 h-8 rounded-full bg-gradient-to-br from-indigo-500 to-purple-500 flex items-center justify-center text-white font-semibold text-sm">
-                                                        {p.client_name?.charAt(0)?.toUpperCase() || "?"}
-                                                    </div>
-                                                    <span className="font-medium text-gray-900">{p.client_name || "-"}</span>
-                                                </div>
-                                            </td>
-                                            <td className="px-6 py-4">
-                                                <div className="flex items-center gap-2 text-gray-600">
-                                                    <Mail size={16} className="text-gray-400" />
-                                                    <span className="text-sm">{p.client_email || "-"}</span>
-                                                </div>
-                                            </td>
-                                            <td className="px-6 py-4">
-                                                <div className="flex items-center gap-2 text-gray-600">
-                                                    <MapPin size={16} className="text-gray-400" />
-                                                    <span className="text-sm">{p.site_address || "-"}</span>
-                                                </div>
-                                            </td>
-                                            <td className="px-6 py-4">
-                                                <span className="text-sm text-gray-600">{p.city || "-"}</span>
-                                            </td>
-                                            <td className="px-6 py-4">
                                                 <span className="inline-flex items-center px-2.5 py-1 rounded-lg bg-blue-50 text-blue-700 text-sm font-medium">
                                                     {p.project_area ? `${p.project_area} sqft` : "-"}
                                                 </span>
@@ -680,7 +684,6 @@ export default function ProjectsDashboard() {
                                             <td className="px-6 py-4">
                                                 <span className="text-sm text-gray-500">{formatDate(p.created_at)}</span>
                                             </td>
-                                            {/* ONLY show delete button to admins */}
                                             {profile?.role === "admin" && (
                                                 <td className="px-6 py-4">
                                                     <div className="flex items-center justify-center gap-2">
@@ -718,7 +721,6 @@ export default function ProjectsDashboard() {
                         </table>
                     </div>
 
-                    {/* Enhanced Footer */}
                     {filteredProjects.length > 0 && (
                         <div className="border-t border-gray-200 bg-gray-50 px-6 py-4">
                             <div className="flex flex-col sm:flex-row justify-between items-center gap-4">
@@ -745,16 +747,14 @@ export default function ProjectsDashboard() {
                 </div>
             </div>
 
-            {/* Enhanced Drawer for Creating Project - ADMIN ONLY */}
+            {/* Enhanced Drawer for Creating Project */}
             {drawerOpen && profile?.role === "admin" && (
                 <div className="fixed inset-0 z-40 flex">
-                    {/* Backdrop */}
                     <div
                         className="absolute inset-0 bg-black/50 backdrop-blur-sm transition-opacity"
                         onClick={() => setDrawerOpen(false)}
                     />
 
-                    {/* Drawer */}
                     <div className="ml-auto w-full max-w-lg bg-white h-full shadow-2xl relative overflow-auto animate-slide-left">
                         <div className="sticky top-0 bg-white border-b border-gray-200 px-6 py-4 z-10">
                             <div className="flex items-center justify-between">
@@ -773,7 +773,6 @@ export default function ProjectsDashboard() {
                         </div>
 
                         <form onSubmit={handleCreateProject} className="p-6 space-y-5">
-                            {/* Client Name */}
                             <div>
                                 <label className="block text-sm font-semibold text-gray-700 mb-2">
                                     Client Name <span className="text-red-500">*</span>
@@ -786,7 +785,6 @@ export default function ProjectsDashboard() {
                                 />
                             </div>
 
-                            {/* Client Email */}
                             <div>
                                 <label className="block text-sm font-semibold text-gray-700 mb-2">
                                     Client Email <span className="text-red-500">*</span>
@@ -801,7 +799,6 @@ export default function ProjectsDashboard() {
                                 <p className="text-xs text-gray-500 mt-1">User with this email will be able to view this project</p>
                             </div>
 
-                            {/* Site Address */}
                             <div>
                                 <label className="block text-sm font-semibold text-gray-700 mb-2">
                                     Site Address <span className="text-red-500">*</span>
@@ -815,7 +812,6 @@ export default function ProjectsDashboard() {
                                 />
                             </div>
 
-                            {/* City and Country */}
                             <div className="grid grid-cols-2 gap-4">
                                 <div>
                                     <label className="block text-sm font-semibold text-gray-700 mb-2">City</label>
@@ -837,7 +833,6 @@ export default function ProjectsDashboard() {
                                 </div>
                             </div>
 
-                            {/* Project Area, Cost, Currency */}
                             <div className="grid grid-cols-3 gap-4">
                                 <div>
                                     <label className="block text-sm font-semibold text-gray-700 mb-2">Area (sqft)</label>
@@ -874,7 +869,6 @@ export default function ProjectsDashboard() {
                                 </div>
                             </div>
 
-                            {/* Action Buttons */}
                             <div className="flex justify-end gap-3 pt-4 border-t border-gray-200">
                                 <button
                                     type="button"
@@ -905,4 +899,5 @@ export default function ProjectsDashboard() {
             )}
         </div>
     );
-}
+};
+                                          
