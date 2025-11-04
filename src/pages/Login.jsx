@@ -40,12 +40,11 @@ export default function Login({ session, loading }) {
   const [message, setMessage] = useState("");
   const [messageType, setMessageType] = useState("");
 
-  // Fix: Handling VITE_APP_URL environment variable 
-  // We use the safer check to avoid the 'empty-import-meta' warning in some envs
-  const redirectBase = (typeof import.meta !== 'undefined' && import.meta.env.VITE_APP_URL) 
-    ? import.meta.env.VITE_APP_URL 
-    : window.location.origin;
-  const redirectUrl = `${redirectBase}/dashboard`; 
+  // Determine base redirect URL (uses environment variable if provided, otherwise current origin)
+  const redirectBase =
+    typeof import.meta !== "undefined" && import.meta.env.VITE_APP_URL
+      ? import.meta.env.VITE_APP_URL
+      : window.location.origin;
 
   // Show message helper
   const showMessage = (msg, type = "info") => {
@@ -166,13 +165,18 @@ export default function Login({ session, loading }) {
         }
 
         // Sign up user
+        // Build signUp options — only pass a custom redirect if VITE_APP_URL is configured
+        const signUpOptions = {
+          data: { name: formData.name },
+        };
+        if (typeof import.meta !== "undefined" && import.meta.env.VITE_APP_URL) {
+          signUpOptions.emailRedirectTo = `${redirectBase}/dashboard`;
+        }
+
         const { data: signUpData, error: signUpError } = await supabase.auth.signUp({
           email: formData.email,
           password: formData.password,
-          options: {
-            data: { name: formData.name },
-            emailRedirectTo: redirectUrl,
-          },
+          options: signUpOptions,
         });
 
         if (signUpError) throw signUpError;
@@ -226,11 +230,13 @@ export default function Login({ session, loading }) {
     showMessage("प्रमाणीकरण के लिए Google पर रीडायरेक्ट हो रहा है...", "info"); // Hindi (Latin) message
     setAuthLoading(true);
     try {
-      // Ensure the redirectUrl is correct for Vercel deployment
-      const { error } = await supabase.auth.signInWithOAuth({
-        provider: "google",
-        options: { redirectTo: redirectUrl },
-      });
+      // NOTE: We intentionally avoid passing a redirectTo here so the
+      // OAuth flow uses the redirect URLs configured in your Supabase
+      // project's Authentication > Providers > Google settings.
+      // If you need a custom redirect, set VITE_APP_URL and ensure the same
+      // URL is configured in Supabase and Google OAuth console to avoid
+      // redirect_uri_mismatch errors.
+      const { error } = await supabase.auth.signInWithOAuth({ provider: "google" });
       if (error) throw error;
       // The browser will redirect, no need for further action here.
     } catch (error) {
