@@ -1,3 +1,4 @@
+//src/pages/Dashboard.jsx
 import React, { useEffect, useState } from "react";
 import { Search, Plus, Trash2, LogOut, X, Filter, Building2, Mail, MapPin, AlertCircle, Loader2 } from "lucide-react";
 import { supabase, logoutUser } from "../lib/supabaseClient.js"; 
@@ -105,7 +106,6 @@ export default function ProjectsDashboard() {
 
                 // Auth Guard
                 if (!currentUser) {
-                    console.log("No user found, redirecting to login");
                     navigate("/", { replace: true });
                     return;
                 }
@@ -120,14 +120,7 @@ export default function ProjectsDashboard() {
                     .eq("id", currentUser.id)
                     .single();
 
-                if (profileErr) {
-                    console.error("Profile fetch error:", profileErr);
-                    pushToast("Profile not found. Please contact support.", "error");
-                    return;
-                }
-
-                if (!profileData) {
-                    console.error("No profile data found");
+                if (profileErr || !profileData) {
                     pushToast("Profile not found. Please contact support.", "error");
                     return;
                 }
@@ -170,11 +163,7 @@ export default function ProjectsDashboard() {
 
             // Apply RLS-compatible filters
             if (profileData?.role !== "admin") {
-                // Regular user - filter by their profile email (not auth email)
-                console.log("User role - filtering by profile email:", profileData.email);
                 query = query.eq("client_email", profileData.email);
-            } else {
-                console.log("Admin role - fetching all properties");
             }
 
             const { data, error } = await query;
@@ -212,8 +201,6 @@ export default function ProjectsDashboard() {
     // Client-side filtering logic
     const filteredProjects = projects.filter((project) => {
         const term = searchTerm.trim().toLowerCase();
-
-        // Text search filter
         if (term) {
             switch (filterBy) {
                 case "client_email":
@@ -236,18 +223,14 @@ export default function ProjectsDashboard() {
                     break;
             }
         }
-
-        // Area numeric filter
         if (areaValue !== "") {
             const num = Number(areaValue);
             const area = Number(project.project_area || 0);
             if (!Number.isFinite(num)) return false;
-
             if (areaOperator === "lt" && !(area < num)) return false;
             if (areaOperator === "eq" && !(area === num)) return false;
             if (areaOperator === "gt" && !(area > num)) return false;
         }
-
         return true;
     });
 
