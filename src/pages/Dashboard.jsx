@@ -3,6 +3,7 @@ import React, { useEffect, useState } from "react";
 import { Search, Plus, Trash2, LogOut, X, Filter, Building2, Mail, MapPin, AlertCircle, Loader2 } from "lucide-react";
 import { supabase, logoutUser } from "../lib/supabaseClient.js"; 
 import { useNavigate } from "react-router-dom";
+import { getUserRole, isAdmin } from "../utils/getUserRole.js";
 
 // --- Custom Confirmation Modal Component ---
 const ConfirmationModal = ({ isOpen, title, message, onConfirm, onCancel }) => {
@@ -161,11 +162,7 @@ export default function ProjectsDashboard() {
                 .select("*")
                 .order("created_at", { ascending: false });
 
-            // Apply RLS-compatible filters
-            if (profileData?.role !== "admin") {
-                query = query.eq("client_email", profileData.email);
-            }
-
+            // Get all projects - no filtering by email
             const { data, error } = await query;
             
             if (error) {
@@ -255,6 +252,13 @@ export default function ProjectsDashboard() {
     
     // Delete project core logic
     const handleDelete = async (id) => {
+        // ✅ STEP 8: Additional role check before delete
+        const userRole = await getUserRole();
+        if (userRole !== "admin") {
+            pushToast("You don't have permission to delete properties!", "error");
+            return;
+        }
+
         try {
             setDeleteLoading(true);
             const { error } = await supabase.from("properties").delete().eq("id", id);
@@ -303,6 +307,15 @@ export default function ProjectsDashboard() {
     const handleCreateProject = async (e) => {
         e?.preventDefault();
         setCreateLoading(true);
+        
+        // ✅ STEP 8: Double-check role before create
+        const userRole = await getUserRole();
+        if (userRole !== "admin") {
+            pushToast("You don't have permission to create properties!", "error");
+            setCreateLoading(false);
+            setDrawerOpen(false);
+            return;
+        }
         
         if (profile?.role !== "admin") {
             pushToast("Only admins can create projects.", "error");
@@ -655,6 +668,24 @@ export default function ProjectsDashboard() {
                                     filteredProjects.slice(0, itemsPerPage).map((p) => (
                                         <tr key={p.id} className="hover:bg-gray-50 transition-colors">
                                             <td className="px-6 py-4">
+                                                <div className="font-medium text-gray-900">{p.client_name || "-"}</div>
+                                            </td>
+                                            <td className="px-6 py-4">
+                                                <div className="flex items-center gap-2">
+                                                    <Mail size={16} className="text-gray-400" />
+                                                    <span className="text-sm text-gray-600">{p.client_email || "-"}</span>
+                                                </div>
+                                            </td>
+                                            <td className="px-6 py-4">
+                                                <div className="flex items-center gap-2">
+                                                    <MapPin size={16} className="text-gray-400" />
+                                                    <span className="text-sm text-gray-600">{p.site_address || "-"}</span>
+                                                </div>
+                                            </td>
+                                            <td className="px-6 py-4">
+                                                <span className="text-sm text-gray-600">{p.city || "-"}</span>
+                                            </td>
+                                            <td className="px-6 py-4">
                                                 <span className="inline-flex items-center px-2.5 py-1 rounded-lg bg-blue-50 text-blue-700 text-sm font-medium">
                                                     {p.project_area ? `${p.project_area} sqft` : "-"}
                                                 </span>
@@ -882,5 +913,4 @@ export default function ProjectsDashboard() {
             )}
         </div>
     );
-};
-                                          
+}
