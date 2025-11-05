@@ -224,21 +224,21 @@ export default function Login({ session, loading }) {
     <>
       <Toast message={message} type={messageType} />
       <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-blue-50 via-indigo-50 to-purple-50 p-4">
-        <div className="relative w-full max-w-5xl h-[650px] rounded-3xl overflow-hidden shadow-2xl">
+        <div className="relative w-full max-w-5xl min-h-[640px] md:min-h-[650px] rounded-3xl overflow-hidden shadow-2xl">
           <div
-            className={`absolute inset-0 flex transition-all duration-700 ease-in-out ${
-              isSignUp ? "flex-row-reverse" : "flex-row"
+            className={`flex flex-col md:flex-row transition-all duration-700 ease-in-out ${
+              isSignUp ? "md:flex-row-reverse" : "md:flex-row"
             }`}
           >
             <div
-              className={`w-1/2 rounded-3xl flex flex-col items-center justify-center text-white p-12 transition-all duration-700 ${
+              className={`w-full md:w-1/2 rounded-3xl flex flex-col items-center justify-center text-white p-8 md:p-12 transition-all duration-700 ${
                 isSignUp
                   ? "bg-gradient-to-br from-purple-600 via-purple-500 to-indigo-500"
                   : "bg-gradient-to-br from-blue-600 via-indigo-600 to-purple-600"
               }`}
             >
               <div className="text-center space-y-6">
-                <h1 className="text-5xl font-bold">
+                <h1 className="text-3xl md:text-5xl font-bold">
                   {isSignUp ? "Already a Client?" : "Welcome Back!"}
                 </h1>
                 <p className="text-lg opacity-90 max-w-md mx-auto leading-relaxed">
@@ -252,7 +252,7 @@ export default function Login({ session, loading }) {
                     setMessage("");
                     setMessageType("");
                   }}
-                  className="mt-8 px-10 py-3.5 border-2 border-white rounded-full text-white font-semibold hover:bg-white hover:text-indigo-600 transition-all duration-300 shadow-lg hover:shadow-xl transform hover:scale-105"
+                  className="mt-8 w-full md:w-auto px-8 md:px-10 py-3.5 border-2 border-white rounded-full text-white font-semibold hover:bg-white hover:text-indigo-600 transition-all duration-300 shadow-lg hover:shadow-xl transform hover:scale-105"
                 >
                   {isSignUp ? "SIGN IN" : "SIGN UP"}
                 </button>
@@ -260,7 +260,7 @@ export default function Login({ session, loading }) {
             </div>
 
             {/* 🔹 Right Form Section */}
-            <div className="w-1/2 bg-white flex items-center justify-center p-12">
+            <div className="w-full md:w-1/2 bg-white flex items-center justify-center p-8 md:p-12">
               <div className="w-full max-w-md">
                 <h2 className="text-3xl font-bold mb-8 text-center text-gray-800">
                   {isSignUp ? "Create Account" : "Sign In"}

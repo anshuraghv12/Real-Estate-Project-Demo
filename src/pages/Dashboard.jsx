@@ -511,7 +511,7 @@ export default function ProjectsDashboard() {
                                 <button
                                     onClick={handleCreateClick}
                                     disabled={createLoading}
-                                    className="bg-gradient-to-r from-indigo-600 to-purple-600 text-white px-6 py-2.5 rounded-xl hover:from-indigo-700 hover:to-purple-700 flex items-center gap-2 font-medium shadow-lg hover:shadow-xl transition-all transform hover:scale-[1.02] disabled:opacity-70 disabled:scale-100"
+                                    className="bg-gradient-to-r from-indigo-600 to-purple-600 text-white px-4 py-2 sm:px-6 sm:py-2.5 rounded-xl hover:from-indigo-700 hover:to-purple-700 flex items-center gap-2 font-medium shadow-lg hover:shadow-xl transition-all transform hover:scale-[1.02] disabled:opacity-70 disabled:scale-100"
                                 >
                                     {createLoading ? (
                                         <>
@@ -534,7 +534,7 @@ export default function ProjectsDashboard() {
 
                             <button
                                 onClick={handleLogout}
-                                className="bg-white border-2 border-gray-200 hover:border-gray-300 hover:bg-gray-50 px-6 py-2.5 rounded-xl flex items-center gap-2 font-medium transition-all"
+                                className="bg-white border-2 border-gray-200 hover:border-gray-300 hover:bg-gray-50 px-4 py-2 sm:px-6 sm:py-2.5 rounded-xl flex items-center gap-2 font-medium transition-all"
                             >
                                 <LogOut size={18} />
                                 Logout
@@ -637,7 +637,56 @@ export default function ProjectsDashboard() {
                 </div>
 
                 {/* Enhanced Table */}
-                <div className="bg-white rounded-2xl shadow-lg overflow-hidden">
+
+                {/* Mobile: card list (visible on small screens) */}
+                <div className="md:hidden">
+                    {loading ? (
+                        <div className="p-6">
+                            <div className="flex items-center gap-3">
+                                <div className="w-8 h-8 border-4 border-indigo-600 border-t-transparent rounded-full animate-spin"></div>
+                                <span className="text-gray-500">Loading projects...</span>
+                            </div>
+                        </div>
+                    ) : filteredProjects.length > 0 ? (
+                        <div className="grid grid-cols-1 gap-4 mb-4">
+                            {filteredProjects.slice(0, itemsPerPage).map((p) => (
+                                <div key={p.id} className="bg-white p-4 rounded-xl shadow-sm">
+                                    <div className="flex justify-between items-start">
+                                        <div>
+                                            <div className="font-semibold text-lg text-gray-900">{p.client_name || '-'}</div>
+                                            <div className="text-sm text-gray-600 mt-1">{p.client_email || '-'}</div>
+                                        </div>
+                                        <div className="text-sm text-gray-500">{formatDate(p.created_at)}</div>
+                                    </div>
+                                    <div className="mt-3 text-sm text-gray-600">{p.site_address || '-'}</div>
+                                    <div className="mt-3 flex items-center justify-between">
+                                        <div className="flex items-center gap-3">
+                                            <span className="px-2 py-1 rounded-lg bg-blue-50 text-blue-700 text-sm">{p.project_area ? `${p.project_area} sqft` : '-'}</span>
+                                            <span className="text-sm font-medium">{p.project_cost ? `${p.currency || ''} ${Number(p.project_cost).toLocaleString()}` : '-'}</span>
+                                        </div>
+                                        {profile?.role === 'admin' && (
+                                            <button
+                                                onClick={() => handleConfirmDelete(p.id)}
+                                                disabled={deleteLoading}
+                                                className="text-red-500 px-3 py-1 rounded-lg border border-red-100 text-sm"
+                                            >
+                                                Delete
+                                            </button>
+                                        )}
+                                    </div>
+                                </div>
+                            ))}
+                        </div>
+                    ) : (
+                        <div className="p-6 text-center text-gray-600">
+                            <Building2 size={48} className="mx-auto text-gray-300" />
+                            <p className="mt-3 font-medium">No projects found</p>
+                            <p className="text-sm text-gray-500 mt-1">{profile?.role === 'admin' ? 'Create a new project to get started' : 'No projects available'}</p>
+                        </div>
+                    )}
+                </div>
+
+                <div className="hidden md:block bg-white rounded-2xl shadow-lg overflow-hidden">
                     <div className="overflow-x-auto">
                         <table className="w-full">
                             <thead>
@@ -769,7 +818,7 @@ export default function ProjectsDashboard() {
                         onClick={() => setDrawerOpen(false)}
                     />
 
-                    <div className="ml-auto w-full max-w-lg bg-white h-full shadow-2xl relative overflow-auto animate-slide-left">
+                    <div className="ml-auto w-full md:max-w-lg bg-white h-full shadow-2xl relative overflow-auto animate-slide-left">
                         <div className="sticky top-0 bg-white border-b border-gray-200 px-6 py-4 z-10">
                             <div className="flex items-center justify-between">
                                 <div>
